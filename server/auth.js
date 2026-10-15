@@ -54,8 +54,9 @@ export function csrfGuard(req, res, next) {
   if (req.get('x-connectly-csrf') !== '1') return res.status(403).json({ error: 'CSRF check failed' });
   const origin = req.get('origin');
   if (origin) {
-    const host = req.get('x-forwarded-host') || req.get('host');
-    try { if (new URL(origin).host !== host) return res.status(403).json({ error: 'CSRF origin mismatch' }); }
+    // Behind the Codespaces proxy Host is rewritten, so also accept the configured public APP_URL host.
+    const allowed = new Set([req.get('x-forwarded-host'), req.get('host'), new URL(config.appUrl).host].filter(Boolean));
+    try { if (!allowed.has(new URL(origin).host)) return res.status(403).json({ error: 'CSRF origin mismatch' }); }
     catch { return res.status(403).json({ error: 'CSRF origin invalid' }); }
   }
   next();
