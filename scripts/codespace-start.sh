@@ -31,6 +31,7 @@ fi
 [ -d node_modules ] || npm ci --no-audit --no-fund
 npm run build >/dev/null
 npm run seed
+[ -s data/geonames/cities500.txt ] || bash scripts/fetch-places.sh || echo "places load failed"
 pkill -f "node server/index.js" 2>/dev/null || true
 setsid nohup npm start > /tmp/app.log 2>&1 < /dev/null &
 sleep 3; curl -fsS localhost:3000/api/health && echo " Connectly is up"
