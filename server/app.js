@@ -1,0 +1,301 @@
+import express from 'express';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import bcrypt from 'bcryptjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { z, ZodError } from 'zod';
+import { q, pool } from './db.js';
+import { config } from './config.js';
+import { loadUser, requireAuth, requireAdmin, csrfGuard, createSession, destroySession, sha256, randomToken } from './auth.js';
+import { upload, saveImage, removeImage, HttpError } from './uploads.js';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const BCRYPT_COST = config.isTest ? 4 : 12;
+const DUMMY_HASH = bcrypt.hashSync('timing-equaliser', BCRYPT_COST);
+
+// ---------- validation schemas ----------
+const username = z.string().trim().regex(/^[A-Za-z0-9_]{3,20}$/, 'Username: 3-20 letters, numbers or _');
+const password = z.string().min(8, 'Password must be at least 8 characters').max(200);
+const RegisterSchema = z.object({
+  username, password,
+  display_name: z.string().trim().min(1).max(50),
+  email: z.string().trim().toLowerCase().email().max(200),
+}).strict();
+const LoginSchema = z.object({ login: z.string().trim().min(1).max(200), password: z.string().min(1).max(200) }).strict();
+const ProfileSchema = z.object({
+  display_name: z.string().trim().min(1).max(50).optional(),
+  bio: z.string().trim().max(300).optional(),
+  location: z.string().trim().max(80).optional(),
+}).strict(); // .strict(): unknown keys such as "role"/"is_admin" are rejected
+const Visibility = z.enum(['public', 'friends', 'private']);
+const PostCreateSchema = z.object({ body: z.string().trim().max(5000).default(''), visibility: Visibility.default('public') }).strict();
+const PostEditSchema = z.object({ body: z.string().trim().max(5000).optional(), visibility: Visibility.optional(), remove_image: z.boolean().optional() }).strict();
+const CommentSchema = z.object({ body: z.string().trim().min(1).max(2000), parent_id: z.number().int().positive().nullish() }).strict();
+const id = (v) => { const n = Number(v); if (!Number.isSafeInteger(n) || n <= 0) throw new HttpError(404, 'Not found'); return n; };
+
+// ---------- SQL helpers ----------
+// $1 is always the viewer id. Visibility is enforced in SQL for every post read.
+const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility = 'friends' AND EXISTS (
+  SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND
+   ((f.requester_id = $1 AND f.addressee_id = p.author_id) OR (f.addressee_id = $1 AND f.requester_id = p.author_id)))))`;
+const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at,
+  json_build_object('id', u.id, 'username', u.username, 'display_name', u.display_name, 'avatar_path', u.avatar_path) AS author,
+  (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
+  (SELECT count(*) FROM comments c WHERE c.post_id = p.id) AS comment_count,
+  EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me
+  FROM posts p JOIN users u ON u.id = p.author_id`;
+const publicUser = (u) => u && ({ id: u.id, username: u.username, display_name: u.display_name, bio: u.bio, location: u.location, avatar_path: u.avatar_path, cover_path: u.cover_path, created_at: u.created_at });
+
+async function getVisiblePost(viewerId, postId) {
+  const { rows } = await q(`${POST_SELECT} WHERE p.id = $2 AND ${VISIBLE}`, [viewerId, postId]);
+  return rows[0] || null;
+}
+async function pagePosts(viewerId, extraWhere, extraParams, cursor, limit) {
+  const lim = Math.min(Math.max(Number(limit) || 10, 1), 50);
+  const params = [viewerId, ...extraParams];
+  let where = `${VISIBLE}${extraWhere ? ' AND ' + extraWhere : ''}`;
+  if (cursor) { params.push(id(cursor)); where += ` AND p.id < $${params.length}`; }
+  params.push(lim + 1);
+  const { rows } = await q(`${POST_SELECT} WHERE ${where} ORDER BY p.id DESC LIMIT $${params.length}`, params);
+  const more = rows.length > lim;
+  const items = rows.slice(0, lim);
+  return { items, next_cursor: more ? String(items[items.length - 1].id) : null };
+}
+
+export function createApp() {
+  const app = express();
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
+  app.use(helmet({
+    contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], connectSrc: ["'self'"], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
+    crossOriginResourcePolicy: { policy: 'same-origin' },
+  }));
+  app.use(express.json({ limit: '100kb' }));
+  app.use(cookieParser());
+
+  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: config.isTest ? 10000 : 20, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again in 15 minutes' } });
+  const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: config.isTest ? 10000 : 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Slow down a little' } });
+
+  const api = express.Router();
+  api.use(csrfGuard, loadUser);
+  api.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+  api.use((req, res, next) => (req.method === 'GET' ? next() : writeLimiter(req, res, next)));
+
+  api.get('/health', async (_req, res) => { await q('SELECT 1'); res.json({ ok: true }); });
+
+  // ---------- auth ----------
+  api.post('/auth/register', authLimiter, async (req, res) => {
+    const d = RegisterSchema.parse(req.body);
+    const hash = await bcrypt.hash(d.password, BCRYPT_COST);
+    try {
+      const { rows } = await q('INSERT INTO users (username, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [d.username, d.display_name, d.email, hash]);
+      await createSession(res, rows[0].id, req.get('user-agent'));
+      res.status(201).json({ id: rows[0].id, username: d.username });
+    } catch (e) {
+      if (e.code === '23505') return res.status(409).json({ error: e.constraint === 'users_email_lower' ? 'Email already registered' : 'Username already taken' });
+      throw e;
+    }
+  });
+  api.post('/auth/login', authLimiter, async (req, res) => {
+    const d = LoginSchema.parse(req.body);
+    const { rows } = await q('SELECT id, password_hash FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($1) LIMIT 1', [d.login]);
+    const ok = rows[0] ? await bcrypt.compare(d.password, rows[0].password_hash) : (await bcrypt.compare(d.password, DUMMY_HASH), false);
+    if (!ok) return res.status(401).json({ error: 'Wrong username/email or password' });
+    await createSession(res, rows[0].id, req.get('user-agent'));
+    res.json({ ok: true });
+  });
+  api.post('/auth/logout', async (req, res) => { await destroySession(req, res); res.json({ ok: true }); });
+  api.post('/auth/forgot', authLimiter, async (req, res) => {
+    const { email } = z.object({ email: z.string().trim().toLowerCase().email() }).strict().parse(req.body);
+    const { rows } = await q('SELECT id FROM users WHERE lower(email) = $1', [email]);
+    if (rows[0]) {
+      const token = randomToken();
+      const url = `${config.appUrl}/reset?token=${token}`;
+      await q("INSERT INTO password_resets (user_id, token_hash, reset_url, expires_at) VALUES ($1,$2,$3, now() + interval '1 hour')", [rows[0].id, sha256(token), url]);
+      // EMAIL DELIVERY NOT CONFIGURED (Milestone 1): link is logged server-side and visible to admins.
+      if (!config.isTest) console.log(`[password-reset] user=${rows[0].id} link=${url}`);
+    }
+    res.json({ ok: true, message: 'If that email is registered, a reset link has been issued.' });
+  });
+  api.post('/auth/reset', authLimiter, async (req, res) => {
+    const d = z.object({ token: z.string().min(10).max(200), password }).strict().parse(req.body);
+    const { rows } = await q('SELECT id, user_id FROM password_resets WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()', [sha256(d.token)]);
+    if (!rows[0]) return res.status(400).json({ error: 'Reset link is invalid or expired' });
+    const hash = await bcrypt.hash(d.password, BCRYPT_COST);
+    await q('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [hash, rows[0].user_id]);
+    await q('UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL', [rows[0].user_id]);
+    await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].user_id]);
+    res.json({ ok: true });
+  });
+
+  api.get('/me', requireAuth, async (req, res) => {
+    const { rows } = await q('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    res.json({ ...publicUser(rows[0]), email: rows[0].email, roles: req.user.roles });
+  });
+
+  // ---------- profiles ----------
+  const editProfile = async (req, res) => {
+    const d = ProfileSchema.parse(req.body);
+    const sets = []; const vals = [];
+    for (const [k, v] of Object.entries(d)) { vals.push(v); sets.push(`${k} = $${vals.length}`); } // keys whitelisted by zod
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    vals.push(req.user.id);
+    const { rows } = await q(`UPDATE users SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length} RETURNING *`, vals);
+    res.json(publicUser(rows[0]));
+  };
+  api.patch('/me', requireAuth, editProfile);
+  api.patch('/users/:username', requireAuth, async (req, res, next) => {
+    if (req.params.username.toLowerCase() !== req.user.username.toLowerCase()) return res.status(403).json({ error: 'You can only edit your own profile' });
+    return editProfile(req, res, next);
+  });
+  for (const kind of ['avatar', 'cover']) {
+    api.post(`/me/${kind}`, requireAuth, upload.single('image'), async (req, res) => {
+      if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+      const p = await saveImage(req.file.buffer, kind);
+      const { rows } = await q(`UPDATE users u SET ${kind}_path = $1, updated_at = now() FROM users old WHERE u.id = $2 AND old.id = u.id RETURNING old.${kind}_path AS prev`, [p, req.user.id]);
+      removeImage(rows[0]?.prev);
+      res.json({ [`${kind}_path`]: p });
+    });
+  }
+  api.get('/users/:username', requireAuth, async (req, res) => {
+    const { rows } = await q('SELECT * FROM users WHERE lower(username) = lower($1)', [req.params.username]);
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    const { rows: c } = await q(`SELECT count(*) AS n FROM posts p WHERE p.author_id = $2 AND ${VISIBLE}`, [req.user.id, rows[0].id]);
+    res.json({ ...publicUser(rows[0]), post_count: c[0].n, is_me: rows[0].id === req.user.id });
+  });
+  api.get('/users/:username/posts', requireAuth, async (req, res) => {
+    const { rows } = await q('SELECT id FROM users WHERE lower(username) = lower($1)', [req.params.username]);
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    res.json(await pagePosts(req.user.id, 'p.author_id = $2', [rows[0].id], req.query.cursor, req.query.limit));
+  });
+
+  // ---------- posts ----------
+  api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, null, [], req.query.cursor, req.query.limit)));
+  api.post('/posts', requireAuth, upload.single('image'), async (req, res) => {
+    const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined });
+    if (!d.body && !req.file) return res.status(400).json({ error: 'Write something or add a photo' });
+    const img = req.file ? await saveImage(req.file.buffer, 'post') : null;
+    const { rows } = await q('INSERT INTO posts (author_id, body, image_path, visibility) VALUES ($1,$2,$3,$4) RETURNING id', [req.user.id, d.body, img, d.visibility]);
+    res.status(201).json(await getVisiblePost(req.user.id, rows[0].id));
+  });
+  api.get('/posts/:id', requireAuth, async (req, res) => {
+    const p = await getVisiblePost(req.user.id, id(req.params.id));
+    if (!p) return res.status(404).json({ error: 'Post not found' });
+    res.json(p);
+  });
+  const ownPost = async (req, res) => {
+    const { rows } = await q(`SELECT p.id, p.author_id, p.image_path, p.body FROM posts p WHERE p.id = $2 AND ${VISIBLE}`, [req.user.id, id(req.params.id)]);
+    if (!rows[0]) { res.status(404).json({ error: 'Post not found' }); return null; }
+    if (rows[0].author_id !== req.user.id) { res.status(403).json({ error: 'You can only change your own posts' }); return null; }
+    return rows[0];
+  };
+  api.patch('/posts/:id', requireAuth, async (req, res) => {
+    const d = PostEditSchema.parse(req.body);
+    const post = await ownPost(req, res); if (!post) return;
+    const body = d.body ?? post.body;
+    const image = d.remove_image ? null : post.image_path;
+    if (!body && !image) return res.status(400).json({ error: 'A post needs text or a photo' });
+    await q('UPDATE posts SET body = $1, image_path = $2, visibility = COALESCE($3, visibility), updated_at = now() WHERE id = $4 AND author_id = $5', [body, image, d.visibility ?? null, post.id, req.user.id]);
+    if (d.remove_image) removeImage(post.image_path);
+    res.json(await getVisiblePost(req.user.id, post.id));
+  });
+  api.delete('/posts/:id', requireAuth, async (req, res) => {
+    const post = await ownPost(req, res); if (!post) return;
+    await q('DELETE FROM posts WHERE id = $1 AND author_id = $2', [post.id, req.user.id]);
+    removeImage(post.image_path);
+    res.json({ ok: true });
+  });
+  const likeCount = async (postId) => (await q('SELECT count(*) AS n FROM post_likes WHERE post_id = $1', [postId])).rows[0].n;
+  api.put('/posts/:id/like', requireAuth, async (req, res) => {
+    const p = await getVisiblePost(req.user.id, id(req.params.id));
+    if (!p) return res.status(404).json({ error: 'Post not found' });
+    await q('INSERT INTO post_likes (post_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [p.id, req.user.id]);
+    res.json({ liked_by_me: true, like_count: await likeCount(p.id) });
+  });
+  api.delete('/posts/:id/like', requireAuth, async (req, res) => {
+    const p = await getVisiblePost(req.user.id, id(req.params.id));
+    if (!p) return res.status(404).json({ error: 'Post not found' });
+    await q('DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2', [p.id, req.user.id]);
+    res.json({ liked_by_me: false, like_count: await likeCount(p.id) });
+  });
+
+  // ---------- comments ----------
+  api.get('/posts/:id/comments', requireAuth, async (req, res) => {
+    const p = await getVisiblePost(req.user.id, id(req.params.id));
+    if (!p) return res.status(404).json({ error: 'Post not found' });
+    const { rows } = await q(`SELECT c.id, c.post_id, c.parent_id, c.body, c.created_at,
+      json_build_object('id', u.id, 'username', u.username, 'display_name', u.display_name, 'avatar_path', u.avatar_path) AS author
+      FROM comments c JOIN users u ON u.id = c.author_id WHERE c.post_id = $1 ORDER BY c.id ASC LIMIT 500`, [p.id]);
+    res.json({ items: rows });
+  });
+  api.post('/posts/:id/comments', requireAuth, async (req, res) => {
+    const d = CommentSchema.parse(req.body);
+    const p = await getVisiblePost(req.user.id, id(req.params.id));
+    if (!p) return res.status(404).json({ error: 'Post not found' });
+    let parent = null;
+    if (d.parent_id) {
+      const { rows } = await q('SELECT id, parent_id FROM comments WHERE id = $1 AND post_id = $2', [d.parent_id, p.id]);
+      if (!rows[0]) return res.status(400).json({ error: 'Parent comment not found on this post' });
+      parent = rows[0].parent_id || rows[0].id; // replies are one level deep
+    }
+    const { rows } = await q('INSERT INTO comments (post_id, author_id, parent_id, body) VALUES ($1,$2,$3,$4) RETURNING id, post_id, parent_id, body, created_at', [p.id, req.user.id, parent, d.body]);
+    res.status(201).json({ ...rows[0], author: { id: req.user.id, username: req.user.username, display_name: req.user.display_name } });
+  });
+  api.delete('/comments/:id', requireAuth, async (req, res) => {
+    const { rows } = await q(`SELECT c.id, c.author_id, p.author_id AS post_author FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = $2 AND ${VISIBLE}`, [req.user.id, id(req.params.id)]);
+    if (!rows[0]) return res.status(404).json({ error: 'Comment not found' });
+    if (rows[0].author_id !== req.user.id && rows[0].post_author !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
+    await q('DELETE FROM comments WHERE id = $1', [rows[0].id]);
+    res.json({ ok: true });
+  });
+
+  // ---------- admin ----------
+  api.get('/admin/users', requireAdmin, async (_req, res) => {
+    const { rows } = await q(`SELECT u.id, u.username, u.display_name, u.email, u.created_at,
+      COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
+      FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id GROUP BY u.id ORDER BY u.id LIMIT 500`);
+    res.json({ items: rows });
+  });
+  api.get('/admin/password-resets', requireAdmin, async (_req, res) => {
+    const { rows } = await q(`SELECT pr.id, u.username, u.email, pr.reset_url, pr.created_at, pr.expires_at FROM password_resets pr JOIN users u ON u.id = pr.user_id
+      WHERE pr.used_at IS NULL AND pr.expires_at > now() ORDER BY pr.id DESC LIMIT 100`);
+    res.json({ items: rows, note: 'Email delivery is not configured; share these links with users manually.' });
+  });
+  api.post('/admin/users/:id/roles', requireAdmin, async (req, res) => {
+    const { role } = z.object({ role: z.enum(['admin', 'moderator']) }).strict().parse(req.body);
+    const r = await q('INSERT INTO user_roles (user_id, role_id, granted_by) SELECT $1, id, $3 FROM roles WHERE name = $2 ON CONFLICT DO NOTHING', [id(req.params.id), role, req.user.id]);
+    res.json({ ok: true, changed: r.rowCount });
+  });
+  api.delete('/admin/users/:id/roles/:role', requireAdmin, async (req, res) => {
+    const uid = id(req.params.id);
+    if (uid === req.user.id && req.params.role === 'admin') return res.status(400).json({ error: 'You cannot remove your own admin role' });
+    await q('DELETE FROM user_roles WHERE user_id = $1 AND role_id = (SELECT id FROM roles WHERE name = $2)', [uid, req.params.role]);
+    res.json({ ok: true });
+  });
+
+  api.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+  app.use('/api', api);
+
+  app.use('/uploads', express.static(config.uploadDir, { maxAge: '7d', immutable: true, fallthrough: false, dotfiles: 'deny' }));
+  const dist = path.join(root, 'web', 'dist');
+  if (fs.existsSync(dist)) {
+    app.use(express.static(dist, { index: false, maxAge: '1h' }));
+    app.get(/^\/(?!api|uploads).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+  }
+
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => {
+    if (err instanceof ZodError) return res.status(400).json({ error: err.issues[0]?.message || 'Invalid input', issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
+    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Image must be 5 MB or smaller' });
+    if (err?.name === 'MulterError') return res.status(400).json({ error: err.message });
+    if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
+    if (err?.status && err.status < 500) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Something went wrong' });
+  });
+  return app;
+}
+export { pool };

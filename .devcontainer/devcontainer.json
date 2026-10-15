@@ -1,0 +1,7 @@
+{
+  "name": "Connectly",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": { "ghcr.io/devcontainers/features/sshd:1": {} },
+  "forwardPorts": [3000],
+  "portsAttributes": { "3000": { "label": "Connectly", "visibility": "public" } }
+}
