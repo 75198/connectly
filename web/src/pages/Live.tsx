@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Room, RoomEvent, Track, createLocalTracks, VideoPresets, type LocalVideoTrack, type LocalAudioTrack, type RemoteTrack } from 'livekit-client';
 import { api, getFeatures, toast } from '../api';
 import { useSession } from '../session';
+import { askPermission, showPermissionDenied } from '../lib/permission';
 import { Avatar, Icon } from '../components/ui';
 
 import type { LiveStream } from '../components/LiveRow';
@@ -68,9 +69,9 @@ export function GoLive() {
   useEffect(() => { api('/live/status').then(setStatus).catch(() => {}); }, []);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => { let cancelled = false; let made: any[] = [];
-    createLocalTracks({ audio: { echoCancellation: true, noiseSuppression: true }, video: { facingMode: 'user', resolution: VideoPresets.h720.resolution } })
+    askPermission('camera+microphone').then((ok) => { if (!ok) throw Object.assign(new Error('declined'), { name: 'Declined' }); return createLocalTracks({ audio: { echoCancellation: true, noiseSuppression: true }, video: { facingMode: 'user', resolution: VideoPresets.h720.resolution } }); })
       .then((ts) => { made = ts; if (cancelled) return ts.forEach((t) => t.stop()); const v = ts.find((t) => t.kind === Track.Kind.Video) as LocalVideoTrack; const a = ts.find((t) => t.kind === Track.Kind.Audio) as LocalAudioTrack; setTracks({ v, a }); })
-      .catch(() => setErr('Allow camera and microphone access to go live.'));
+      .catch((e) => { if (e?.name === 'NotAllowedError') showPermissionDenied('camera+microphone'); setErr('Allow camera and microphone access to go live.'); });
     return () => { cancelled = true; made.forEach((t) => t.stop()); };
   }, []);
   useEffect(() => { if (tracks.v && videoRef.current) tracks.v.attach(videoRef.current); }, [tracks.v]);

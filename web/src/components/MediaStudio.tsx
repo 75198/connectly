@@ -3,6 +3,7 @@
 import { PointerEvent as RPE, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './ui';
+import { askPermission, showPermissionDenied } from '../lib/permission';
 
 export type StudioResult = { file: File; enhance: boolean };
 type Props = { onDone: (r: StudioResult) => void; onClose: () => void; allowVideo?: boolean; initial?: File | Blob | null; startWith?: 'menu' | 'camera' | 'avatar' };
@@ -52,11 +53,13 @@ function Camera({ allowVideo, onPhoto, onVideo, onBack }: { allowVideo: boolean;
     (async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser can’t open the camera. Use Gallery instead.');
+        const kind = allowVideo && mode === 'video' ? 'camera+microphone' : 'camera';
+        if (!await askPermission(kind)) { if (live) setErr('Camera is off. Use Gallery instead, or tap Camera again to allow it.'); return; }
         const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: allowVideo && mode === 'video' });
         if (!live) { s.getTracks().forEach((t) => t.stop()); return; }
         stream.current = s; if (v.current) { v.current.srcObject = s; await v.current.play().catch(() => {}); }
         const caps: any = s.getVideoTracks()[0]?.getCapabilities?.() || {}; setTorch(caps.torch ? false : null);
-      } catch (e: any) { setErr(e.name === 'NotAllowedError' ? 'Camera permission was not given. Allow it in your browser settings, or use Gallery.' : e.message || 'Couldn’t open the camera.'); }
+      } catch (e: any) { if (e.name === 'NotAllowedError') showPermissionDenied(allowVideo && mode === 'video' ? 'camera+microphone' : 'camera'); setErr(e.name === 'NotAllowedError' ? 'Camera permission was not given. Allow it in your browser settings, or use Gallery.' : e.message || 'Couldn’t open the camera.'); }
     })();
     return () => { live = false; stream.current?.getTracks().forEach((t) => t.stop()); };
   }, [facing, mode, allowVideo]);

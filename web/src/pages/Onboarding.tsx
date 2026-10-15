@@ -5,6 +5,7 @@ import { useSession } from '../session';
 import { Avatar, Icon } from '../components/ui';
 import { FlowShell } from './Auth';
 import { WELCOME_KEY } from './Welcome';
+import { askPermission, showPermissionDenied } from '../lib/permission';
 
 const STEPS = ['Add a profile photo', 'Stay in the loop', 'Where are you?', 'Find people you know'];
 type Match = { id: number; username: string; full_name: string; avatar_path: string | null };
@@ -32,18 +33,21 @@ export function Onboarding() {
   });
   const notifications = () => run(async () => {
     if (!('Notification' in window)) { setNote('This browser doesn’t support notifications.'); return; }
+    if (!await askPermission('notifications')) { setNote('No problem. You can turn notifications on later.'); return; }
     const p = await Notification.requestPermission();
     if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js').catch(() => {});
     if (p === 'granted') { setNote('Notifications are on.'); setTimeout(next, 700); } else setNote('Notifications are off. You can enable them later in your browser settings.');
   });
   const location = () => run(async () => {
     if (!('geolocation' in navigator)) { setNote('Location isn’t available in this browser.'); return; }
+    if (!await askPermission('location')) { setNote('No problem. You can add your city later in your profile.'); return; }
     const pos = await new Promise<GeolocationPosition>((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }))
-      .catch(() => { throw new Error('Location permission was not given. You can add your city later in your profile.'); });
+      .catch((e) => { if (e?.code === 1) showPermissionDenied('location'); throw new Error('Location permission was not given. You can add your city later in your profile.'); });
     const r = await api<{ location: string }>('/me/location', { json: { lat: +pos.coords.latitude.toFixed(3), lon: +pos.coords.longitude.toFixed(3) } });
     setNote(`Saved: ${r.location}`); await refresh(); setTimeout(next, 900);
   });
   const contacts = () => run(async () => {
+    if (!await askPermission('contacts')) { setNote('No problem. You can find friends later from Search.'); return; }
     const picked: { email?: string[]; tel?: string[] }[] = await (navigator as any).contacts.select(['email', 'tel'], { multiple: true });
     const vals = new Set<string>();
     for (const c of picked) {

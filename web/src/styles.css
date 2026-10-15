@@ -522,3 +522,11 @@ button,a,.chip,.btn{transition:transform .12s ease,background-color .15s ease,co
 .livemenu{position:absolute;top:calc(60px + env(safe-area-inset-top));right:10px;background:#1c1c1c;border-radius:12px;z-index:5;overflow:hidden}
 .livemenu button{display:flex;gap:8px;align-items:center;background:none;border:0;color:#fff;padding:12px 16px;font:inherit;cursor:pointer}
 .liveunmute{position:absolute;top:45%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6)!important;color:#fff!important;border-radius:999px;z-index:4}
+/* Pre-permission sheet (round 6) */
+.permback{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;animation:permfade .15s ease-out}
+.permcard{width:100%;max-width:440px;background:var(--surface,#fff);color:var(--text,#14201E);border-radius:22px 22px 0 0;padding:24px 20px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;animation:permup .22s ease-out}
+@media(min-width:600px){.permback{align-items:center}.permcard{border-radius:22px}}
+.permlogo{border-radius:14px}.permicon{font-size:1.6rem;margin-top:-26px;margin-left:46px;background:var(--surface,#fff);border-radius:50%;width:34px;height:34px;display:grid;place-items:center;box-shadow:0 1px 6px rgba(0,0,0,.18)}
+.permcard h2{margin:4px 0 0;font-size:1.2rem;letter-spacing:-.01em}.permcard p{margin:0 0 6px;color:var(--muted,#5F6F6C)}
+.permsteps{text-align:left;margin:0 0 8px;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:.92rem}
+@keyframes permfade{from{opacity:0}}@keyframes permup{from{transform:translateY(30px)}}
