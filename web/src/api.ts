@@ -1,5 +1,5 @@
-export type User = { id: number; username: string; display_name: string; bio: string; location: string; avatar_path: string | null; cover_path: string | null; created_at: string; email?: string; email_verified?: boolean; roles?: string[]; post_count?: number; is_me?: boolean };
-export type Author = { id: number; username: string; display_name: string; avatar_path: string | null };
+export type User = { id: number; username: string; full_name: string; bio: string; location: string; avatar_path: string | null; cover_path: string | null; created_at: string; email?: string | null; phone?: string | null; email_verified?: boolean; onboarded?: boolean; roles?: string[]; post_count?: number; is_me?: boolean };
+export type Author = { id: number; username: string; full_name: string; avatar_path: string | null };
 export type Post = { id: number; body: string; image_path: string | null; visibility: 'public' | 'friends' | 'private'; created_at: string; updated_at: string; author: Author; like_count: number; comment_count: number; liked_by_me: boolean };
 export type Comment = { id: number; post_id: number; parent_id: number | null; body: string; created_at: string; author: Author };
 export type Page<T> = { items: T[]; next_cursor: string | null };
@@ -25,3 +25,7 @@ export function timeAgo(iso: string) {
   if (s < 604800) return `${Math.floor(s / 86400)}d`;
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+export const looksLikePhone = (s: string) => !s.includes('@') && /^[+\d(][\d\s().-]*$/.test(s.trim()) && /\d/.test(s);
+export const NAME_RE = (() => { try { return new RegExp("^[\\p{L}\\p{M}][\\p{L}\\p{M}' ’-]*[\\p{L}\\p{M}]$", 'u'); } catch { return /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' ’-]*[A-Za-zÀ-ÿ]$/; } })();
+export function ageFrom(dob: string) { const d = new Date(dob + 'T00:00:00Z'), n = new Date(); let a = n.getUTCFullYear() - d.getUTCFullYear(); const m = n.getUTCMonth() - d.getUTCMonth(); if (m < 0 || (m === 0 && n.getUTCDate() < d.getUTCDate())) a--; return a; }

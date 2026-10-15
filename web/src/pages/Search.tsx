@@ -4,7 +4,7 @@ import { api } from '../api';
 import { Avatar, Icon } from '../components/ui';
 import { PostList, usePosts } from '../components/PostList';
 
-type Person = { id: number; username: string; display_name: string; avatar_path: string | null; bio: string };
+type Person = { id: number; username: string; full_name: string; avatar_path: string | null; bio: string };
 
 export function Search() {
   const [sp, setSp] = useSearchParams();
@@ -29,7 +29,7 @@ function People({ q }: { q: string }) {
   if (err) return <p className="error card">{err}</p>;
   if (!items) return <p className="card empty">Searching…</p>;
   if (!items.length) return <p className="card empty">No people match “{q}”.</p>;
-  return <div className="card list">{items.map((p) => <Link key={p.id} to={`/u/${p.username}`} className="person"><Avatar user={p} size={44} /><span className="grow"><b>{p.display_name}</b><small className="meta">@{p.username}{p.bio ? ` · ${p.bio}` : ''}</small></span></Link>)}</div>;
+  return <div className="card list">{items.map((p) => <Link key={p.id} to={`/u/${p.username}`} className="person"><Avatar user={p} size={44} /><span className="grow"><b>{p.full_name}</b><small className="meta">@{p.username}{p.bio ? ` · ${p.bio}` : ''}</small></span></Link>)}</div>;
 }
 function Posts({ q }: { q: string }) {
   const feed = usePosts(`/search?type=posts&q=${encodeURIComponent(q)}`);

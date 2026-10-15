@@ -25,7 +25,7 @@ export async function loadUser(req, _res, next) {
   const t = req.cookies?.[COOKIE];
   if (t) {
     const { rows } = await q(
-      `SELECT u.id, u.username, u.display_name, u.email, u.email_verified_at,
+      `SELECT u.id, u.username, u.full_name, u.email, u.email_verified_at,
               COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
          FROM sessions s JOIN users u ON u.id = s.user_id
          LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id

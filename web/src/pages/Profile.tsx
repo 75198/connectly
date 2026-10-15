@@ -18,7 +18,7 @@ export function Profile() {
       <div className="cover" style={u.cover_path ? { backgroundImage: `url(${u.cover_path})` } : undefined} />
       <div className="pinfo">
         <div className="pav"><Avatar user={u} size={112} /></div>
-        <div className="grow"><h1>{u.display_name}</h1><div className="meta">@{u.username} · {u.post_count} post{u.post_count === 1 ? '' : 's'}</div></div>
+        <div className="grow"><h1>{u.full_name}</h1><div className="meta">@{u.username} · {u.post_count} post{u.post_count === 1 ? '' : 's'}</div></div>
         {u.is_me && <Link className="btn ghost" to="/settings/profile"><Icon name="gear" /> Edit profile</Link>}
       </div>
       {(u.bio || u.location) && <div className="pbio">{u.bio && <p>{u.bio}</p>}{u.location && <p className="meta">📍 {u.location}</p>}</div>}
@@ -31,7 +31,7 @@ export function Profile() {
 
 export function EditProfile() {
   const { me, refresh } = useSession(); const nav = useNavigate();
-  const [d, setD] = useState({ display_name: me?.display_name || '', bio: me?.bio || '', location: me?.location || '' });
+  const [d, setD] = useState({ full_name: me?.full_name || '', username: me?.username || '', bio: me?.bio || '', location: me?.location || '' });
   const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState('');
   if (!me) return null;
   async function save(e: FormEvent) { e.preventDefault(); setErr(''); setMsg(''); try { await api('/me', { method: 'PATCH', json: d }); await refresh(); setMsg('Profile saved'); } catch (x: any) { setErr(x.message); } }
@@ -53,7 +53,8 @@ export function EditProfile() {
       <small className="meta">JPEG, PNG, WebP or GIF up to 5 MB.</small>
     </section>
     <form className="card stack" onSubmit={save}>
-      <label>Display name<input value={d.display_name} onChange={(e) => setD({ ...d, display_name: e.target.value })} maxLength={50} required /></label>
+      <label>Full name<input value={d.full_name} onChange={(e) => setD({ ...d, full_name: e.target.value })} maxLength={80} required autoComplete="name" /></label>
+      <label>Username<input value={d.username} onChange={(e) => setD({ ...d, username: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} minLength={3} maxLength={20} required autoCapitalize="none" /><span className="hint">Your profile link: /u/{d.username || 'username'} · 3–20 letters, numbers or _</span></label>
       <label>Bio<textarea value={d.bio} onChange={(e) => setD({ ...d, bio: e.target.value })} maxLength={300} rows={3} /><small className="meta">{d.bio.length}/300</small></label>
       <label>Location<input value={d.location} onChange={(e) => setD({ ...d, location: e.target.value })} maxLength={80} /></label>
       {err && <p className="error">{err}</p>}{msg && <p className="success">{msg}</p>}

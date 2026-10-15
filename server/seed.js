@@ -8,7 +8,7 @@ await migrate({ quiet: true });
 async function upsert(username, display, email, pw) {
   const { rows } = await q('SELECT id FROM users WHERE lower(username)=lower($1)', [username]);
   if (rows[0]) return { id: rows[0].id, created: false };
-  const r = await q('INSERT INTO users (username, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [username, display, email, await bcrypt.hash(pw, 12)]);
+  const r = await q('INSERT INTO users (username, full_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [username, display, email, await bcrypt.hash(pw, 12)]);
   return { id: r.rows[0].id, created: true };
 }
 // Demo accounts are for local development only (SEED_DEMO=1). Production seeds only the admin.
@@ -26,6 +26,6 @@ if (admin.created) {
   console.log('admin created; credentials written to', credFile);
 }
 await q("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name='admin' ON CONFLICT DO NOTHING", [admin.id]);
-await q("UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()) WHERE username IN ('alice','bob','admin')");
+await q("UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()), onboarded_at = COALESCE(onboarded_at, now()), terms_accepted_at = COALESCE(terms_accepted_at, now()) WHERE username IN ('alice','bob','admin')");
 console.log('seed complete');
 await pool.end();

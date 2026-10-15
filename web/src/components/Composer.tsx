@@ -30,7 +30,7 @@ export function Composer({ onPosted, autoFocus }: { onPosted: (p: Post) => void;
   if (!me) return null;
   return (
     <form className="card composer" onSubmit={submit} aria-label="Create post">
-      <div className="row"><Avatar user={me} /><textarea autoFocus={autoFocus} value={body} onChange={(e) => setBody(e.target.value)} maxLength={5000} placeholder={`What's on your mind, ${me.display_name.split(' ')[0]}?`} rows={3} /></div>
+      <div className="row"><Avatar user={me} /><textarea autoFocus={autoFocus} value={body} onChange={(e) => setBody(e.target.value)} maxLength={5000} placeholder={`What's on your mind, ${me.full_name.split(' ')[0]}?`} rows={3} /></div>
       {preview && <div className="preview"><img src={preview} alt="Selected" /><button type="button" className="chip" onClick={() => { setFile(null); if (input.current) input.current.value = ''; }}>Remove photo</button></div>}
       {err && <p className="error">{err}</p>}
       <div className="row between wrap">

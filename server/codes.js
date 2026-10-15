@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { q } from './db.js';
 import { sendMail } from './mailer.js';
+import { sendSms } from './sms.js';
 const SECRET = process.env.CODE_SECRET || 'connectly-code-pepper';
 const TTL_MIN = 10, MAX_ATTEMPTS = 5, COOLDOWN_SEC = 60;
 const hash = (userId, purpose, code) => crypto.createHmac('sha256', SECRET).update(`${userId}:${purpose}:${code}`).digest('hex');
@@ -16,7 +17,8 @@ export async function issueCode(user, purpose) {
   await q(`UPDATE email_codes SET used_at = now() WHERE user_id=$1 AND purpose=$2 AND used_at IS NULL`, [user.id, purpose]);
   await q(`INSERT INTO email_codes (user_id, purpose, code_hash, expires_at) VALUES ($1,$2,$3, now() + interval '${TTL_MIN} minutes')`, [user.id, purpose, hash(user.id, purpose, code)]);
   const [subject, text] = COPY[purpose](code);
-  await sendMail({ to: user.email, subject, text });
+  if (user.email) await sendMail({ to: user.email, subject, text });
+  else await sendSms(user.phone, `Connectly code: ${code} (expires in ${TTL_MIN} min)`);
   return { ok: true };
 }
 // Checks a code; counts attempts. Returns 'ok' | 'invalid' | 'expired' | 'locked'.

@@ -87,7 +87,7 @@ function Comments({ post, onCount }: { post: Post; onCount: (n: number) => void 
     <div className="comments">
       {err && <p className="error">{err}</p>}
       {top.map((c) => <div key={c.id}>{one(c)}{items.filter((r) => r.parent_id === c.id).map((r) => one(r, true))}</div>)}
-      {replyTo && <div className="meta small">Replying to {replyTo.author.display_name} · <button className="linkish" onClick={() => setReplyTo(null)}>cancel</button></div>}
+      {replyTo && <div className="meta small">Replying to {replyTo.author.full_name} · <button className="linkish" onClick={() => setReplyTo(null)}>cancel</button></div>}
       <CommentBox key={replyTo?.id ?? 0} placeholder={replyTo ? 'Write a reply…' : 'Write a comment…'} onSubmit={(b) => add(b, replyTo?.id)} />
     </div>
   );

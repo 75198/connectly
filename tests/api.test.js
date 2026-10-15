@@ -5,18 +5,24 @@ import sharp from 'sharp';
 import { createApp, pool } from '../server/app.js';
 import { migrate } from '../server/migrate.js';
 import { testOutbox } from '../server/mailer.js';
+import { testSmsOutbox } from '../server/sms.js';
 const lastCode = (email) => [...testOutbox].reverse().find((m) => m.to === email)?.text.match(/\b(\d{6})\b/)[1];
 
 let app;
 const H = { 'X-Connectly-CSRF': '1' };
 const agent = () => { const a = request.agent(app); return a; };
 const post = (a, url) => a.post(url).set(H);
+const DOB = '1995-05-05';
+const signup = (a, email, extra = {}) => post(a, '/api/auth/register').send({ identifier: email, password: 'Password123!', full_name: 'Test Person', birth_date: DOB, accept_terms: true, ...extra });
 async function register(name) {
   const a = agent();
-  const r = await post(a, '/api/auth/register').send({ username: name, display_name: name.toUpperCase(), email: `${name}@t.io`, password: 'Password123!' });
+  const email = `${name}@t.io`;
+  const r = await signup(a, email, { full_name: name[0].toUpperCase() + name.slice(1) + ' Tester' });
   assert.equal(r.status, 201, JSON.stringify(r.body));
-  const v = await post(a, '/api/auth/verify').send({ code: lastCode(`${name}@t.io`) });
+  const v = await post(a, '/api/auth/verify').send({ identifier: email, code: lastCode(email) });
   assert.equal(v.status, 200, JSON.stringify(v.body));
+  const u = await a.patch('/api/me').set(H).send({ username: name });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
   return a;
 }
 let png;
@@ -29,14 +35,36 @@ before(async () => {
 after(() => pool.end());
 
 let A, B, C;
-test('registration validates and enforces unique username/email', async () => {
+test('signup steps: identifier check, name, age, terms, uniqueness', async () => {
   A = await register('alice'); B = await register('bob'); C = await register('carol');
-  let r = await post(agent(), '/api/auth/register').send({ username: 'ALICE', display_name: 'x', email: 'z@t.io', password: 'Password123!' });
-  assert.equal(r.status, 409);
-  r = await post(agent(), '/api/auth/register').send({ username: 'zed', display_name: 'x', email: 'alice@t.io', password: 'Password123!' });
-  assert.equal(r.status, 409);
-  r = await post(agent(), '/api/auth/register').send({ username: 'a b', display_name: 'x', email: 'bad', password: 'short' });
-  assert.equal(r.status, 400);
+  let r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'ALICE@t.io' }); assert.equal(r.status, 409);
+  r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'new@t.io' }); assert.equal(r.body.type, 'email');
+  r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'not-an-email@' }); assert.equal(r.status, 400);
+  r = await post(agent(), '/api/auth/check-identifier').send({ identifier: '0803 123 4567', country: 'NG' });
+  assert.equal(r.status, 400); assert.match(r.body.error, /Phone sign-up is coming soon/);
+  r = await signup(agent(), 'p@t.io', { identifier: '+2348031234567' }); assert.equal(r.status, 400, 'phone disabled server-side without SMS');
+  r = await signup(agent(), 'alice@t.io'); assert.equal(r.status, 409);
+  r = await signup(agent(), 'n1@t.io', { full_name: 'R2D2 Robot' }); assert.equal(r.status, 400);
+  r = await signup(agent(), 'n1@t.io', { full_name: "Mary-Jane O'Neil" }); assert.equal(r.status, 201);
+  const young = new Date(); young.setUTCFullYear(young.getUTCFullYear() - 12);
+  r = await signup(agent(), 'kid@t.io', { birth_date: young.toISOString().slice(0, 10) }); assert.equal(r.status, 400); assert.match(r.body.error, /at least 13/);
+  r = await signup(agent(), 'bad@t.io', { birth_date: '2001-02-30' }); assert.equal(r.status, 400);
+  r = await signup(agent(), 'nt@t.io', { accept_terms: false }); assert.equal(r.status, 400);
+  r = await signup(agent(), 'pw@t.io', { password: 'short' }); assert.equal(r.status, 400);
+  r = await signup(agent(), 'x@t.io', { display_name: 'nope' }); assert.equal(r.status, 400, 'no display_name field');
+  r = await A.get('/api/me'); assert.equal(r.body.full_name, 'Alice Tester'); assert.equal(r.body.display_name, undefined);
+  r = await B.get('/api/users/alice'); assert.equal(r.body.birth_date, undefined, 'DOB private');
+  r = await A.patch('/api/me').set(H).send({ username: 'bob' }); assert.equal(r.status, 409);
+});
+
+test('auto-generated usernames are unique', async () => {
+  const a1 = agent(), a2 = agent();
+  await signup(a1, 'jm1@t.io', { full_name: 'Jimoh Mojeed' });
+  await post(a1, '/api/auth/verify').send({ identifier: 'jm1@t.io', code: lastCode('jm1@t.io') });
+  await signup(a2, 'jm2@t.io', { full_name: 'Jimoh Mojeed' });
+  await post(a2, '/api/auth/verify').send({ identifier: 'jm2@t.io', code: lastCode('jm2@t.io') });
+  const u1 = (await a1.get('/api/me')).body.username, u2 = (await a2.get('/api/me')).body.username;
+  assert.equal(u1, 'jimohmojeed'); assert.match(u2, /^jimohmojeed\d+$/);
 });
 
 test('CSRF header required for writes', async () => {
@@ -60,51 +88,55 @@ test('login, session cookie flags, me, logout', async () => {
   r = await request(app).get('/api/feed'); assert.equal(r.status, 401);
 });
 
-test('email verification with 6-digit code: attempts, resend cooldown, unverified cannot post', async () => {
+test('verification code: pending cannot log in, attempts, resend cooldown, expiry, auto-login', async () => {
   const a = agent();
-  let r = await post(a, '/api/auth/register').send({ username: 'dave', display_name: 'Dave', email: 'dave@t.io', password: 'Password123!' });
-  assert.equal(r.status, 201); assert.equal(r.body.needs_verification, true);
-  const code = lastCode('dave@t.io'); assert.match(code, /^\d{6}$/);
+  let r = await signup(a, 'dave@t.io', { full_name: 'Dave Pending' }); assert.equal(r.status, 201); assert.equal(r.body.pending, true);
+  r = await a.get('/api/me'); assert.equal(r.status, 401, 'no session before verification');
+  r = await post(agent(), '/api/auth/login').send({ login: 'dave@t.io', password: 'Password123!' });
+  assert.equal(r.status, 403); assert.equal(r.body.code, 'PENDING_VERIFICATION');
+  const code = lastCode('dave@t.io');
   const { rows } = await pool.query("SELECT code_hash FROM email_codes ORDER BY id DESC LIMIT 1");
   assert.notEqual(rows[0].code_hash, code, 'code stored hashed');
-  r = await a.get('/api/me'); assert.equal(r.body.email_verified, false);
-  r = await post(a, '/api/posts').field('body', 'hi'); assert.equal(r.status, 403); assert.equal(r.body.code, 'EMAIL_UNVERIFIED');
-  r = await post(a, '/api/auth/resend-verification'); assert.equal(r.status, 429, 'cooldown');
+  r = await post(a, '/api/auth/resend').send({ identifier: 'dave@t.io' }); assert.equal(r.status, 429, 'cooldown');
   const wrong = code === '000000' ? '111111' : '000000';
-  r = await post(a, '/api/auth/verify').send({ code: 'abc' }); assert.equal(r.status, 400);
-  r = await post(a, '/api/auth/verify').send({ code: wrong }); assert.equal(r.body.reason, 'invalid');
-  r = await post(a, '/api/auth/verify').send({ code }); assert.equal(r.status, 200);
-  r = await a.get('/api/me'); assert.equal(r.body.email_verified, true);
+  r = await post(a, '/api/auth/verify').send({ identifier: 'dave@t.io', code: 'abc' }); assert.equal(r.status, 400);
+  r = await post(a, '/api/auth/verify').send({ identifier: 'dave@t.io', code: wrong }); assert.equal(r.body.reason, 'invalid');
+  r = await a.get('/api/me'); assert.equal(r.status, 401, 'wrong code => still not signed in');
+  r = await post(a, '/api/auth/verify').send({ identifier: 'dave@t.io', code }); assert.equal(r.status, 200);
+  r = await a.get('/api/me'); assert.equal(r.status, 200, 'auto-login'); assert.equal(r.body.onboarded, false);
   r = await post(a, '/api/posts').field('body', 'hi'); assert.equal(r.status, 201);
-  // lockout after 5 wrong attempts, then resend after cooldown issues a working code
+  r = await post(a, '/api/me/onboarding-complete'); r = await a.get('/api/me'); assert.equal(r.body.onboarded, true);
+  // lockout after 5 wrong attempts
   const e = agent();
-  await post(e, '/api/auth/register').send({ username: 'erin', display_name: 'Erin', email: 'erin@t.io', password: 'Password123!' });
+  await signup(e, 'erin@t.io', { full_name: 'Erin Locked' });
   const ecode = lastCode('erin@t.io'); const bad = ecode === '999999' ? '888888' : '999999';
-  for (let i = 0; i < 4; i++) { r = await post(e, '/api/auth/verify').send({ code: bad }); assert.equal(r.body.reason, 'invalid'); }
-  r = await post(e, '/api/auth/verify').send({ code: bad }); assert.equal(r.body.reason, 'locked');
-  r = await post(e, '/api/auth/verify').send({ code: ecode }); assert.equal(r.status, 400, 'locked code no longer works');
+  for (let i = 0; i < 4; i++) { r = await post(e, '/api/auth/verify').send({ identifier: 'erin@t.io', code: bad }); assert.equal(r.body.reason, 'invalid'); }
+  r = await post(e, '/api/auth/verify').send({ identifier: 'erin@t.io', code: bad }); assert.equal(r.body.reason, 'locked');
+  r = await post(e, '/api/auth/verify').send({ identifier: 'erin@t.io', code: ecode }); assert.equal(r.status, 400, 'locked code no longer works');
   await pool.query("UPDATE email_codes SET created_at = now() - interval '2 minutes'");
-  r = await post(e, '/api/auth/resend-verification'); assert.equal(r.status, 200);
-  r = await post(e, '/api/auth/verify').send({ code: lastCode('erin@t.io') }); assert.equal(r.status, 200);
+  r = await post(e, '/api/auth/resend').send({ identifier: 'erin@t.io' }); assert.equal(r.status, 200);
+  r = await post(e, '/api/auth/verify').send({ identifier: 'erin@t.io', code: lastCode('erin@t.io') }); assert.equal(r.status, 200);
   // expiry
   const f = agent();
-  await post(f, '/api/auth/register').send({ username: 'fay', display_name: 'Fay', email: 'fay@t.io', password: 'Password123!' });
-  await pool.query("UPDATE email_codes SET expires_at = now() - interval '1 second' WHERE user_id = (SELECT id FROM users WHERE username='fay')");
-  r = await post(f, '/api/auth/verify').send({ code: lastCode('fay@t.io') }); assert.equal(r.body.reason, 'expired');
+  await signup(f, 'fay@t.io', { full_name: 'Fay Expired' });
+  await pool.query("UPDATE email_codes SET expires_at = now() - interval '1 second' WHERE user_id = (SELECT id FROM users WHERE email='fay@t.io')");
+  r = await post(f, '/api/auth/verify').send({ identifier: 'fay@t.io', code: lastCode('fay@t.io') }); assert.equal(r.body.reason, 'expired');
+  // abandoned pending signup can be restarted
+  r = await signup(agent(), 'fay@t.io', { full_name: 'Fay Again' }); assert.equal(r.status, 201);
 });
 
 test('password reset with 6-digit code', async () => {
-  let r = await post(agent(), '/api/auth/forgot').send({ email: 'carol@t.io' });
+  let r = await post(agent(), '/api/auth/forgot').send({ identifier: 'carol@t.io' });
   assert.equal(r.status, 200);
-  r = await post(agent(), '/api/auth/forgot').send({ email: 'nobody@t.io' });
+  r = await post(agent(), '/api/auth/forgot').send({ identifier: 'nobody@t.io' });
   assert.equal(r.status, 200); // no account enumeration
   const code = lastCode('carol@t.io');
   const wrong = code === '123456' ? '654321' : '123456';
-  r = await post(agent(), '/api/auth/reset').send({ email: 'carol@t.io', code: wrong, password: 'NewPassword1!' });
+  r = await post(agent(), '/api/auth/reset').send({ identifier: 'carol@t.io', code: wrong, password: 'NewPassword1!' });
   assert.equal(r.status, 400);
-  r = await post(agent(), '/api/auth/reset').send({ email: 'carol@t.io', code, password: 'NewPassword1!' });
+  r = await post(agent(), '/api/auth/reset').send({ identifier: 'carol@t.io', code, password: 'NewPassword1!' });
   assert.equal(r.status, 200);
-  r = await post(agent(), '/api/auth/reset').send({ email: 'carol@t.io', code, password: 'Another123!' });
+  r = await post(agent(), '/api/auth/reset').send({ identifier: 'carol@t.io', code, password: 'Another123!' });
   assert.equal(r.status, 400, 'code single use');
   r = await C.get('/api/me'); assert.equal(r.status, 401, 'old sessions revoked');
   C = agent();
@@ -113,7 +145,7 @@ test('password reset with 6-digit code', async () => {
 });
 
 test('profile edit own only; cannot self-grant admin', async () => {
-  let r = await A.patch('/api/me').set(H).send({ bio: 'Hello there', location: 'Lagos', display_name: 'Alice A' });
+  let r = await A.patch('/api/me').set(H).send({ bio: 'Hello there', location: 'Lagos', full_name: 'Alice A' });
   assert.equal(r.status, 200); assert.equal(r.body.bio, 'Hello there');
   r = await B.get('/api/users/alice'); assert.equal(r.body.location, 'Lagos'); assert.equal(r.body.email, undefined);
   r = await A.patch('/api/users/bob').set(H).send({ bio: 'hacked' });
@@ -234,6 +266,28 @@ test('search people and posts respects visibility', async () => {
   r = await A.get('/api/search?q=diary&type=posts'); assert.equal(r.body.items.length, 1);
   r = await C.get('/api/search?q=edited&type=posts'); assert.equal(r.body.items[0].id, pub.id);
   r = await C.get('/api/search?q=&type=posts'); assert.equal(r.status, 400);
+});
+
+test('phone signup works end-to-end when an SMS provider is configured', async () => {
+  process.env.TEST_SMS = '1';
+  try {
+    const a = agent();
+    let r = await signup(a, '', { identifier: '0803 123 4567', country: 'NG', full_name: 'Phone User' });
+    assert.equal(r.status, 201); assert.equal(r.body.sent_to, '+2348031234567');
+    const code = testSmsOutbox.at(-1).text.match(/\d{6}/)[0]; assert.equal(testSmsOutbox.at(-1).to, '+2348031234567');
+    r = await post(a, '/api/auth/verify').send({ identifier: '+2348031234567', code }); assert.equal(r.status, 200);
+    r = await post(agent(), '/api/auth/login').send({ login: '08031234567', password: 'Password123!', country: 'NG' }); assert.equal(r.status, 200, 'login with local phone format');
+  } finally { delete process.env.TEST_SMS; }
+});
+
+test('contacts matching by hash only', async () => {
+  const crypto = await import('node:crypto');
+  const h = (s) => crypto.createHash('sha256').update(s).digest('hex');
+  let r = await post(A, '/api/contacts/match').send({ hashes: [h('bob@t.io'), h('nobody@x.io')] });
+  assert.equal(r.status, 200); assert.deepEqual(r.body.items.map((u) => u.username), ['bob']);
+  r = await post(A, '/api/contacts/match').send({ hashes: ['bob@t.io'] }); assert.equal(r.status, 400, 'raw values rejected');
+  const { rows } = await pool.query("SELECT count(*)::int n FROM information_schema.columns WHERE table_name LIKE '%contact%'");
+  assert.equal(rows[0].n, 0, 'no contact storage');
 });
 
 test('security headers present', async () => {

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../session';
 
-type AU = { id: number; username: string; display_name: string; email: string; roles: string[]; created_at: string };
+type AU = { id: number; username: string; full_name: string; email: string; roles: string[]; created_at: string };
 type St = { smtp_configured: boolean; note: string };
 export function Admin() {
   const { me } = useSession();

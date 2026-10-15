@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
@@ -11,6 +12,8 @@ import { q, pool } from './db.js';
 import { config } from './config.js';
 import { issueCode, consumeCode, CODE_ERRORS } from './codes.js';
 import { smtpConfigured } from './mailer.js';
+import { smsConfigured } from './sms.js';
+import { parseIdentifier, identCol, FullName, BirthDate, generateUsername } from './identity.js';
 import { loadUser, requireVerified, requireAuth, requireAdmin, csrfGuard, createSession, destroySession } from './auth.js';
 import { upload, saveImage, removeImage, HttpError } from './uploads.js';
 
@@ -21,14 +24,10 @@ const DUMMY_HASH = bcrypt.hashSync('timing-equaliser', BCRYPT_COST);
 // ---------- validation schemas ----------
 const username = z.string().trim().regex(/^[A-Za-z0-9_]{3,20}$/, 'Username: 3-20 letters, numbers or _');
 const password = z.string().min(8, 'Password must be at least 8 characters').max(200);
-const RegisterSchema = z.object({
-  username, password,
-  display_name: z.string().trim().min(1).max(50),
-  email: z.string().trim().toLowerCase().email().max(200),
-}).strict();
-const LoginSchema = z.object({ login: z.string().trim().min(1).max(200), password: z.string().min(1).max(200) }).strict();
+const LoginSchema = z.object({ login: z.string().trim().min(1).max(200), password: z.string().min(1).max(200), country: z.string().length(2).optional() }).strict();
 const ProfileSchema = z.object({
-  display_name: z.string().trim().min(1).max(50).optional(),
+  full_name: FullName.optional(),
+  username: username.optional(),
   bio: z.string().trim().max(300).optional(),
   location: z.string().trim().max(80).optional(),
 }).strict(); // .strict(): unknown keys such as "role"/"is_admin" are rejected
@@ -44,12 +43,12 @@ const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility =
   SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND
    ((f.requester_id = $1 AND f.addressee_id = p.author_id) OR (f.addressee_id = $1 AND f.requester_id = p.author_id)))))`;
 const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at,
-  json_build_object('id', u.id, 'username', u.username, 'display_name', u.display_name, 'avatar_path', u.avatar_path) AS author,
+  json_build_object('id', u.id, 'username', u.username, 'full_name', u.full_name, 'avatar_path', u.avatar_path) AS author,
   (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
   (SELECT count(*) FROM comments c WHERE c.post_id = p.id) AS comment_count,
   EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me
   FROM posts p JOIN users u ON u.id = p.author_id`;
-const publicUser = (u) => u && ({ id: u.id, username: u.username, display_name: u.display_name, bio: u.bio, location: u.location, avatar_path: u.avatar_path, cover_path: u.cover_path, created_at: u.created_at });
+const publicUser = (u) => u && ({ id: u.id, username: u.username, full_name: u.full_name, bio: u.bio, location: u.location, avatar_path: u.avatar_path, cover_path: u.cover_path, created_at: u.created_at });
 
 async function getVisiblePost(viewerId, postId) {
   const { rows } = await q(`${POST_SELECT} WHERE p.id = $2 AND ${VISIBLE}`, [viewerId, postId]);
@@ -75,6 +74,7 @@ export function createApp() {
     contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], connectSrc: ["'self'"], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
     crossOriginResourcePolicy: { policy: 'same-origin' },
   }));
+  app.use(compression({ threshold: 1024 }));
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
@@ -89,67 +89,105 @@ export function createApp() {
   api.get('/health', async (_req, res) => { await q('SELECT 1'); res.json({ ok: true }); });
 
   // ---------- auth ----------
+  // Signup: the client collects identifier+password, name, DOB and terms over several screens,
+  // then calls /auth/register once. Only then is a *pending* account created and a code sent.
+  const Ident = z.object({ identifier: z.string().max(200), country: z.string().length(2).toUpperCase().default('NG') });
+  const requireChannel = (id) => {
+    if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
+  };
+  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13 }));
+  api.post('/auth/check-identifier', authLimiter, async (req, res) => {
+    const d = Ident.strict().parse(req.body);
+    const id = parseIdentifier(d.identifier, d.country);
+    requireChannel(id);
+    const { rows } = await q(`SELECT 1 FROM users WHERE ${identCol(id)} = $1 AND email_verified_at IS NOT NULL`, [id.value]);
+    if (rows.length) return res.status(409).json({ error: id.type === 'email' ? 'An account with this email already exists. Try logging in.' : 'An account with this phone number already exists. Try logging in.', type: id.type });
+    res.json({ ok: true, type: id.type, normalized: id.value });
+  });
   api.post('/auth/register', authLimiter, async (req, res) => {
-    const d = RegisterSchema.parse(req.body);
+    const d = Ident.extend({ password, full_name: FullName, birth_date: BirthDate, accept_terms: z.literal(true, { errorMap: () => ({ message: 'You must agree to the Terms to continue' }) }) }).strict().parse(req.body);
+    const id = parseIdentifier(d.identifier, d.country);
+    requireChannel(id);
     const hash = await bcrypt.hash(d.password, BCRYPT_COST);
+    const client = await pool.connect();
+    let user;
     try {
-      const { rows } = await q('INSERT INTO users (username, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [d.username, d.display_name, d.email, hash]);
-      await createSession(res, rows[0].id, req.get('user-agent'));
-      await issueCode({ id: rows[0].id, email: d.email }, 'verify_email');
-      res.status(201).json({ id: rows[0].id, username: d.username, needs_verification: true });
-    } catch (e) {
-      if (e.code === '23505') return res.status(409).json({ error: e.constraint === 'users_email_lower' ? 'Email already registered' : 'Username already taken' });
-      throw e;
-    }
+      await client.query('BEGIN');
+      const { rows: ex } = await client.query(`SELECT id, email_verified_at FROM users WHERE ${identCol(id)} = $1 FOR UPDATE`, [id.value]);
+      if (ex[0]?.email_verified_at) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'An account with this email or phone already exists. Try logging in.' }); }
+      if (ex[0]) await client.query('DELETE FROM users WHERE id = $1', [ex[0].id]); // replace an abandoned pending signup
+      const uname = await generateUsername(d.full_name, client);
+      const { rows } = await client.query(
+        `INSERT INTO users (username, full_name, email, phone, password_hash, birth_date, terms_accepted_at) VALUES ($1,$2,$3,$4,$5,$6, now()) RETURNING id, email, phone`,
+        [uname, d.full_name, id.type === 'email' ? id.value : null, id.type === 'phone' ? id.value : null, hash, d.birth_date]);
+      await client.query('COMMIT');
+      user = rows[0];
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e.code === '23505') return res.status(409).json({ error: 'That account already exists' }); throw e; } finally { client.release(); }
+    try { await issueCode(user, 'verify_email'); }
+    catch (e) { await q('DELETE FROM users WHERE id = $1', [user.id]); console.error('[signup] code delivery failed', e.message); return res.status(502).json({ error: 'We couldn’t send your code right now. Please try again in a minute.' }); }
+    res.status(201).json({ ok: true, pending: true, type: id.type, sent_to: id.value });
+  });
+  const Code = z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code');
+  const pendingUser = async (d) => {
+    const id = parseIdentifier(d.identifier, d.country);
+    const { rows } = await q(`SELECT id, email, phone, email_verified_at FROM users WHERE ${identCol(id)} = $1`, [id.value]);
+    return rows[0];
+  };
+  api.post('/auth/verify', authLimiter, async (req, res) => {
+    const d = Ident.extend({ code: Code }).strict().parse(req.body);
+    const u = await pendingUser(d);
+    if (!u || u.email_verified_at) return res.status(400).json({ error: 'Code expired or not found — request a new one', reason: 'expired' });
+    const r = await consumeCode(u.id, 'verify_email', d.code);
+    if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
+    await q('UPDATE users SET email_verified_at = now() WHERE id = $1', [u.id]);
+    await createSession(res, u.id, req.get('user-agent')); // auto-login after verification
+    res.json({ ok: true });
+  });
+  api.post('/auth/resend', authLimiter, async (req, res) => {
+    const d = Ident.strict().parse(req.body);
+    const u = await pendingUser(d);
+    if (!u || u.email_verified_at) return res.json({ ok: true }); // no enumeration
+    if (!u.email) requireChannel({ type: 'phone' });
+    const r = await issueCode(u, 'verify_email');
+    if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter });
+    res.json({ ok: true });
   });
   api.post('/auth/login', authLimiter, async (req, res) => {
     const d = LoginSchema.parse(req.body);
-    const { rows } = await q('SELECT id, password_hash FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($1) LIMIT 1', [d.login]);
+    let where = 'lower(username) = lower($1)'; let val = d.login;
+    try { const id = parseIdentifier(d.login, d.country || 'NG'); where = `${identCol(id)} = $1`; val = id.value; } catch { /* treat as username */ }
+    const { rows } = await q(`SELECT id, password_hash, email_verified_at FROM users WHERE ${where} LIMIT 1`, [val]);
     const ok = rows[0] ? await bcrypt.compare(d.password, rows[0].password_hash) : (await bcrypt.compare(d.password, DUMMY_HASH), false);
-    if (!ok) return res.status(401).json({ error: 'Wrong username/email or password' });
+    if (!ok) return res.status(401).json({ error: 'Wrong email/phone or password' });
+    if (!rows[0].email_verified_at) return res.status(403).json({ error: 'This account isn’t verified yet. Enter the code we sent you, or request a new one.', code: 'PENDING_VERIFICATION' });
     await createSession(res, rows[0].id, req.get('user-agent'));
     res.json({ ok: true });
   });
   api.post('/auth/logout', async (req, res) => { await destroySession(req, res); res.json({ ok: true }); });
-  const Code = z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code');
-  api.post('/auth/verify', authLimiter, requireAuth, async (req, res) => {
-    const { code } = z.object({ code: Code }).strict().parse(req.body);
-    if (req.user.email_verified_at) return res.json({ ok: true, already: true });
-    const r = await consumeCode(req.user.id, 'verify_email', code);
-    if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
-    await q('UPDATE users SET email_verified_at = now() WHERE id = $1', [req.user.id]);
-    res.json({ ok: true });
-  });
-  api.post('/auth/resend-verification', authLimiter, requireAuth, async (req, res) => {
-    if (req.user.email_verified_at) return res.status(400).json({ error: 'Email already verified' });
-    const r = await issueCode(req.user, 'verify_email');
-    if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter });
-    res.json({ ok: true });
-  });
   api.post('/auth/forgot', authLimiter, async (req, res) => {
-    const { email } = z.object({ email: z.string().trim().toLowerCase().email() }).strict().parse(req.body);
-    const { rows } = await q('SELECT id, email FROM users WHERE lower(email) = $1', [email]);
+    const d = Ident.strict().parse(req.body);
+    const id = parseIdentifier(d.identifier, d.country);
+    requireChannel(id);
+    const { rows } = await q(`SELECT id, email, phone FROM users WHERE ${identCol(id)} = $1 AND email_verified_at IS NOT NULL`, [id.value]);
     if (rows[0]) {
       const r = await issueCode(rows[0], 'reset_password');
       if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter });
     }
-    res.json({ ok: true, message: 'If that email is registered, a 6-digit code has been sent.' });
+    res.json({ ok: true, message: 'If an account exists, we’ve sent a 6-digit code.' });
   });
   api.post('/auth/reset', authLimiter, async (req, res) => {
-    const d = z.object({ email: z.string().trim().toLowerCase().email(), code: Code, password }).strict().parse(req.body);
-    const { rows } = await q('SELECT id FROM users WHERE lower(email) = $1', [d.email]);
-    const r = rows[0] ? await consumeCode(rows[0].id, 'reset_password', d.code) : 'expired';
+    const d = Ident.extend({ code: Code, password }).strict().parse(req.body);
+    const u = await pendingUser(d);
+    const r = u?.email_verified_at ? await consumeCode(u.id, 'reset_password', d.code) : 'expired';
     if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
-    const hash = await bcrypt.hash(d.password, BCRYPT_COST);
-    // Receiving the code proves email ownership, so this also verifies the email.
-    await q('UPDATE users SET password_hash = $1, email_verified_at = COALESCE(email_verified_at, now()), updated_at = now() WHERE id = $2', [hash, rows[0].id]);
-    await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].id]);
+    await q('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [await bcrypt.hash(d.password, BCRYPT_COST), u.id]);
+    await q('DELETE FROM sessions WHERE user_id = $1', [u.id]);
     res.json({ ok: true });
   });
 
   api.get('/me', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT * FROM users WHERE id = $1', [req.user.id]);
-    res.json({ ...publicUser(rows[0]), email: rows[0].email, email_verified: Boolean(rows[0].email_verified_at), roles: req.user.roles });
+    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), roles: req.user.roles });
   });
 
   // ---------- profiles ----------
@@ -159,8 +197,10 @@ export function createApp() {
     for (const [k, v] of Object.entries(d)) { vals.push(v); sets.push(`${k} = $${vals.length}`); } // keys whitelisted by zod
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
     vals.push(req.user.id);
-    const { rows } = await q(`UPDATE users SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length} RETURNING *`, vals);
-    res.json(publicUser(rows[0]));
+    try {
+      const { rows } = await q(`UPDATE users SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length} RETURNING *`, vals);
+      res.json(publicUser(rows[0]));
+    } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'That username is taken' }); throw e; }
   };
   api.patch('/me', requireAuth, editProfile);
   api.patch('/users/:username', requireAuth, async (req, res, next) => {
@@ -243,7 +283,7 @@ export function createApp() {
     const p = await getVisiblePost(req.user.id, id(req.params.id));
     if (!p) return res.status(404).json({ error: 'Post not found' });
     const { rows } = await q(`SELECT c.id, c.post_id, c.parent_id, c.body, c.created_at,
-      json_build_object('id', u.id, 'username', u.username, 'display_name', u.display_name, 'avatar_path', u.avatar_path) AS author
+      json_build_object('id', u.id, 'username', u.username, 'full_name', u.full_name, 'avatar_path', u.avatar_path) AS author
       FROM comments c JOIN users u ON u.id = c.author_id WHERE c.post_id = $1 ORDER BY c.id ASC LIMIT 500`, [p.id]);
     res.json({ items: rows });
   });
@@ -258,7 +298,7 @@ export function createApp() {
       parent = rows[0].parent_id || rows[0].id; // replies are one level deep
     }
     const { rows } = await q('INSERT INTO comments (post_id, author_id, parent_id, body) VALUES ($1,$2,$3,$4) RETURNING id, post_id, parent_id, body, created_at', [p.id, req.user.id, parent, d.body]);
-    res.status(201).json({ ...rows[0], author: { id: req.user.id, username: req.user.username, display_name: req.user.display_name } });
+    res.status(201).json({ ...rows[0], author: { id: req.user.id, username: req.user.username, full_name: req.user.full_name } });
   });
   api.delete('/comments/:id', requireAuth, async (req, res) => {
     const { rows } = await q(`SELECT c.id, c.author_id, p.author_id AS post_author FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = $2 AND ${VISIBLE}`, [req.user.id, id(req.params.id)]);
@@ -268,14 +308,40 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+  // ---------- onboarding ----------
+  api.post('/me/onboarding-complete', requireAuth, async (req, res) => { await q('UPDATE users SET onboarded_at = COALESCE(onboarded_at, now()) WHERE id = $1', [req.user.id]); res.json({ ok: true }); });
+  // Converts coordinates to "City, Country" server-side; the coordinates themselves are never stored.
+  api.post('/me/location', requireAuth, async (req, res) => {
+    const d = z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) }).strict().parse(req.body);
+    let place = '';
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&lat=${d.lat}&lon=${d.lon}`, { headers: { 'User-Agent': 'Connectly/0.1 (social app)', 'Accept-Language': 'en' }, signal: AbortSignal.timeout(6000) });
+      const j = await r.json(); const a = j.address || {};
+      place = [a.city || a.town || a.village || a.county || a.state, a.country].filter(Boolean).join(', ').slice(0, 80);
+    } catch { /* fall through */ }
+    if (!place) return res.status(502).json({ error: 'Couldn’t work out your city right now. You can add it later in your profile.' });
+    await q('UPDATE users SET location = $1, updated_at = now() WHERE id = $2', [place, req.user.id]);
+    res.json({ location: place });
+  });
+  // Contact matching: client sends SHA-256 hashes of normalised emails/E.164 phones. Nothing is stored.
+  api.post('/contacts/match', requireAuth, async (req, res) => {
+    const { hashes } = z.object({ hashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(2000) }).strict().parse(req.body);
+    if (!hashes.length) return res.json({ items: [] });
+    const { rows } = await q(`SELECT id, username, full_name, avatar_path FROM users
+      WHERE id <> $1 AND email_verified_at IS NOT NULL AND (
+        (email IS NOT NULL AND encode(sha256(convert_to(lower(email), 'UTF8')), 'hex') = ANY($2)) OR
+        (phone IS NOT NULL AND encode(sha256(convert_to(phone, 'UTF8')), 'hex') = ANY($2))) LIMIT 100`, [req.user.id, hashes]);
+    res.json({ items: rows });
+  });
+
   // ---------- search ----------
   api.get('/search', requireAuth, async (req, res) => {
     const { q: term, type, cursor } = z.object({ q: z.string().trim().min(1).max(100), type: z.enum(['people', 'posts']).default('people'), cursor: z.string().optional(), limit: z.string().optional() }).parse(req.query);
     const like = '%' + term.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
     if (type === 'people') {
-      const { rows } = await q(`SELECT id, username, display_name, avatar_path, bio FROM users
-        WHERE email_verified_at IS NOT NULL AND (lower(username) || ' ' || lower(display_name)) LIKE $1
-        ORDER BY (lower(username) = lower($2)) DESC, (lower(username) LIKE lower($2) || '%') DESC, display_name LIMIT 20`, [like, term]);
+      const { rows } = await q(`SELECT id, username, full_name, avatar_path, bio FROM users
+        WHERE email_verified_at IS NOT NULL AND (lower(username) || ' ' || lower(full_name)) LIKE $1
+        ORDER BY (lower(username) = lower($2)) DESC, (lower(username) LIKE lower($2) || '%') DESC, full_name LIMIT 20`, [like, term]);
       return res.json({ items: rows, next_cursor: null });
     }
     res.json(await pagePosts(req.user.id, 'lower(p.body) LIKE $2', [like], cursor, req.query.limit));
@@ -283,13 +349,13 @@ export function createApp() {
 
   // ---------- admin ----------
   api.get('/admin/users', requireAdmin, async (_req, res) => {
-    const { rows } = await q(`SELECT u.id, u.username, u.display_name, u.email, u.created_at, u.email_verified_at IS NOT NULL AS email_verified,
+    const { rows } = await q(`SELECT u.id, u.username, u.full_name, u.email, u.phone, u.created_at, u.email_verified_at IS NOT NULL AS email_verified,
       COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
       FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id GROUP BY u.id ORDER BY u.id LIMIT 500`);
     res.json({ items: rows });
   });
   api.get('/admin/status', requireAdmin, async (_req, res) => {
-    res.json({ smtp_configured: smtpConfigured, note: smtpConfigured ? 'Emails are sent via SMTP.' : 'SMTP is not configured: confirmation and reset codes are only written to the server log (/tmp/app.log).' });
+    res.json({ smtp_configured: smtpConfigured, sms_configured: smsConfigured(), note: smtpConfigured ? 'Emails are sent via SMTP.' : 'SMTP is not configured: confirmation and reset codes are only written to the server log (/tmp/app.log).' });
   });
   api.post('/admin/users/:id/roles', requireAdmin, async (req, res) => {
     const { role } = z.object({ role: z.enum(['admin', 'moderator']) }).strict().parse(req.body);
@@ -309,8 +375,22 @@ export function createApp() {
   app.use('/uploads', express.static(config.uploadDir, { maxAge: '7d', immutable: true, fallthrough: false, dotfiles: 'deny' }));
   const dist = path.join(root, 'web', 'dist');
   if (fs.existsSync(dist)) {
-    app.use(express.static(dist, { index: false, maxAge: '1h' }));
-    app.get(/^\/(?!api|uploads).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+    // Serve pre-compressed brotli/gzip copies of hashed assets (built by scripts/precompress.js).
+    app.use('/assets', (req, res, next) => {
+      const ae = req.get('accept-encoding') || '';
+      const file = path.join(dist, 'assets', path.basename(req.path));
+      const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : null;
+      for (const [enc, ext] of [['br', '.br'], ['gzip', '.gz']]) {
+        if (type && ae.includes(enc) && fs.existsSync(file + ext)) {
+          res.set({ 'Content-Encoding': enc, 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable', Vary: 'Accept-Encoding' });
+          return res.sendFile(file + ext);
+        }
+      }
+      next();
+    });
+    app.use('/assets', express.static(path.join(dist, 'assets'), { maxAge: '365d', immutable: true }));
+    app.use(express.static(dist, { index: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
+    app.get(/^\/(?!api|uploads).*/, (_req, res) => { res.set('Cache-Control', 'no-cache'); res.sendFile(path.join(dist, 'index.html')); });
   }
 
   // eslint-disable-next-line no-unused-vars
