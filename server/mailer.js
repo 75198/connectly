@@ -12,5 +12,11 @@ export const testOutbox = []; // populated only in NODE_ENV=test
 export async function sendMail({ to, subject, text }) {
   if (config.isTest) { testOutbox.push({ to, subject, text }); return; }
   if (!transport) { console.log(`[mail:NOT-CONFIGURED] to=${to} subject="${subject}"\n${text}`); return; }
-  await transport.sendMail({ from: e.SMTP_FROM, to, subject, text });
+  try {
+    const info = await transport.sendMail({ from: e.SMTP_FROM, to, subject, text });
+    console.log(`[mail:sent] to=${to} subject="${subject}" response="${info.response}"`);
+  } catch (err) {
+    console.error(`[mail:error] to=${to} subject="${subject}" ${err.message}`);
+    throw err;
+  }
 }
