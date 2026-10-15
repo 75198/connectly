@@ -20,6 +20,7 @@ export const config = {
     reports: (env.FEATURE_REPORTS ?? '1') !== '0',
     reels: (env.FEATURE_REELS ?? '1') !== '0',
     welcomeHero: (env.FEATURE_WELCOME_HERO ?? '1') !== '0',
+    aiSupport: (env.FEATURE_AI_SUPPORT ?? '0') === '1',
   },
   powBits: Number(env.POW_BITS || (isTest ? 4 : 17)),
   codeSecret: env.CODE_SECRET || 'dev-only-secret',
@@ -27,5 +28,11 @@ export const config = {
   maxVideoBytes: 50 * 1024 * 1024,
   maxVideoSeconds: 60,
   ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',
+  // AI support chat (Groq, OpenAI-compatible). The key lives only in .env on the server.
+  groqApiKey: env.GROQ_API_KEY || '',
+  groqBaseUrl: env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
+  groqModel: env.GROQ_MODEL || 'openai/gpt-oss-20b',
+  aiUserHourly: Number(env.AI_USER_HOURLY || 30),
+  aiDailyCap: Number(env.AI_DAILY_CAP || 900),
   ffprobePath: env.FFPROBE_PATH || 'ffprobe',
 };

@@ -19,6 +19,7 @@ import { upload, saveImage, removeImage, HttpError } from './uploads.js';
 import { notify, registerSocial } from './social.js';
 import { registerReels } from './reels.js';
 import { registerPostExtras } from './postextras.js';
+import { registerAi } from './ai.js';
 import { newChallenge, verifyPow } from './pow.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -144,7 +145,7 @@ export function createApp() {
   const requireChannel = (id) => {
     if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
   };
-  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero } }));
+  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero, ai_support: config.features.aiSupport } }));
   api.get('/auth/challenge', authLimiter, (_req, res) => res.json(newChallenge()));
   const MAX_ACCOUNTS = 10;
   const accountsFor = async (id, { verifiedOnly = true } = {}) => (await q(
@@ -543,6 +544,7 @@ export function createApp() {
   });
   registerSocial(api, { requireAuth, requireVerified, id, pagePosts, checkPassword, BCRYPT_COST, config });
   registerReels(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility });
+  registerAi(api, { requireAuth, id });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
   // ---------- reports & moderation ----------

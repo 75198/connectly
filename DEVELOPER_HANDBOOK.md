@@ -60,6 +60,7 @@ Flags live in `server/config.js` → `config.features` and are read from env var
 | `FEATURE_SIGNUP_POW` | 1 | Require the proof-of-work bot check on `/api/auth/register` |
 | `FEATURE_REPORTS` | 1 | Enable `POST /api/reports` |
 | `FEATURE_REELS` | 1 | Reels API (`/api/reels*`) and the Reels entries in the Home header, sidebar and Create menu |
+| `FEATURE_AI_SUPPORT` | 0 | Connectly Assistant AI support chat (`/api/ai/*`, `/assistant`, entries in Profile hub and Search) |
 | `FEATURE_WELCOME_HERO` | 1 | Animated video landing screen at `/` for logged-out visitors (off: `/` goes straight to Log in) |
 Flags the client needs are exposed read-only in `GET /api/auth/capabilities` → `features`.
 Other tunables: `POW_BITS` (default 17, about 1-3 s in a phone browser; raise it if bots get through).
@@ -118,3 +119,12 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
   - an original SVG avatar maker.
   It is used by the composer, stories, the reel cover and the profile photo.
 - Screenshots: `python3 scripts/round5b_screens.py http://localhost:3055 a.jpg b.jpg c.jpg` (light and dark) → `screenshots/round5/`.
+
+## 13. Connectly Assistant: AI support chat (round 6, migration 011)
+- Server proxy `server/ai.js`: `POST /api/ai/chat {conversation_id?, message}` calls Groq's OpenAI-compatible API (`GROQ_BASE_URL`, default `https://api.groq.com/openai/v1`; `GROQ_MODEL`, default `openai/gpt-oss-20b`) with `GROQ_API_KEY` from `.env`. The key is only ever on the server; it is never logged or sent to the browser. Replies stream back as NDJSON lines: `{conversation_id,title}`, then `{t}` deltas, then `{done,id}` or `{error,fallback:true}`.
+- History: new tables `ai_conversations` and `ai_messages` (additive). `GET /api/ai/conversations`, `GET /api/ai/conversations/:id` (own chats only), `GET /api/ai/status`. The last 12 messages are sent as context.
+- Limits (counted from `ai_messages`, so they survive restarts): `AI_USER_HOURLY` (default 30) per user per hour, `AI_DAILY_CAP` (default 900) for everyone per UTC day to stay inside the Groq free tier. Both return 429 with a friendly "try later" message.
+- Fallback: no key gives 503 with a canned help message; Groq errors or timeouts (45 s) stream a friendly `{error}`. The UI shows it as a bubble.
+- System prompt (`SYSTEM_PROMPT`): Connectly help only, never reveals other users' data, cannot take account actions, points serious issues to Report.
+- Client `web/src/pages/Assistant.tsx` at `/assistant` (full screen): bubbles, typing dots, suggested questions, new chat, history panel, light/dark via theme variables.
+- Tests: `tests/ai.test.js` uses a local mock Groq server.

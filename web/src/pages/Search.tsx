@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, getFeatures } from '../api';
 import { Avatar, Icon } from '../components/ui';
 import { PostList, usePosts } from '../components/PostList';
 
@@ -55,7 +55,8 @@ function saveRecent(q: string) { const r = [q, ...getRecent().filter((x) => x.to
 const CATS: [string, string, string, string][] = [['people', 'People', '👥', '#0F766E'], ['posts', 'Posts', '📝', '#0EA5E9'], ['pages', 'Pages', '⭐', '#F59E0B'], ['groups', 'Groups', '🫂', '#10B981'], ['communities', 'Communities', '🌍', '#8B5CF6']];
 const IDEAS = ['Lagos', 'Football', 'Afrobeats', 'Recipes', 'Tech jobs', 'Fashion'];
 function Discover({ onPick }: { onPick: (q: string, type?: string) => void }) {
-  const [recent, setRecent] = useState(getRecent); const [people, setPeople] = useState<Person[] | null>(null);
+  const [recent, setRecent] = useState(getRecent); const [ai, setAi] = useState(false);
+  useEffect(() => { getFeatures().then((f) => setAi(!!f.ai_support)); }, []); const [people, setPeople] = useState<Person[] | null>(null);
   useEffect(() => { api<{ items: Person[] }>('/search?type=people&q=a').then((r) => setPeople(r.items.slice(0, 8))).catch(() => setPeople([])); }, []);
   return <div className="stack">
     {recent.length > 0 && <section className="card"><div className="row between"><h3>Recent</h3><button className="linkish" onClick={() => { localStorage.removeItem(RKEY); setRecent([]); }}>Clear all</button></div>
@@ -63,6 +64,7 @@ function Discover({ onPick }: { onPick: (q: string, type?: string) => void }) {
         <button className="btn icon ghost" aria-label={`Remove ${r}`} onClick={() => { const n = recent.filter((x) => x !== r); localStorage.setItem(RKEY, JSON.stringify(n)); setRecent(n); }}><Icon name="x" /></button></div>)}</div></section>}
     {people && people.length > 0 && <section className="card"><h3>People you may know</h3><div className="hscroll">{people.map((p) => <Link key={p.id} to={`/u/${p.username}`} className="pcard"><Avatar user={p} size={64} /><b>{p.full_name}</b><small className="meta">@{p.username}</small></Link>)}</div></section>}
     <section><h3 className="grouphead">Browse</h3><div className="catgrid">{CATS.map(([k, l, e, c]) => <button key={k} className="catcard" style={{ ['--c' as any]: c }} onClick={() => onPick(IDEAS[CATS.findIndex((x) => x[0] === k)] || 'a', k)}><span>{e}</span><b>{l}</b></button>)}</div></section>
+    {ai && <Link to="/assistant" className="card person aientry"><span className="aiorb sm">✦</span><span className="grow"><b>Need help? Ask Connectly Assistant</b><small className="meta">Posting, reels, privacy, account recovery and more</small></span><Icon name="chev" /></Link>}
     <section className="card"><h3>Trending searches</h3><div className="chiprow wrap">{IDEAS.map((t) => <button key={t} className="chip" onClick={() => onPick(t)}>🔥 {t}</button>)}</div></section>
   </div>;
 }

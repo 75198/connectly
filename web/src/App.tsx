@@ -37,6 +37,7 @@ const Welcome = lazy(() => import('./pages/Welcome').then((m) => ({ default: m.W
 const Reels = lazy(() => import('./pages/Reels').then((m) => ({ default: m.Reels })));
 const NewReel = lazy(() => import('./pages/Reels').then((m) => ({ default: m.NewReel })));
 const MyPosts = lazy(() => import('./pages/MyPosts').then((m) => ({ default: m.MyPosts })));
+const Assistant = lazy(() => import('./pages/Assistant').then((m) => ({ default: m.Assistant })));
 const Search = lazy(() => import('./pages/Search').then((m) => ({ default: m.Search })));
 
 export function App() { return <SessionProvider><Router /><Toaster /></SessionProvider>; }
@@ -64,6 +65,7 @@ function Router() {
   </Routes></Suspense>;
   if (!me.onboarded && !['/terms', '/privacy'].includes(loc.pathname)) return <Suspense fallback={<Loading />}><Onboarding /></Suspense>;
   if (welcome && !['/terms', '/privacy'].includes(loc.pathname)) return <Suspense fallback={<Loading />}><Welcome onDone={() => { sessionStorage.removeItem(WELCOME_KEY); setWelcome(false); }} /></Suspense>;
+  if (loc.pathname === '/assistant') return <Suspense fallback={<Loading />}><Assistant /></Suspense>;
   if (/^\/reels(\/\d+)?$/.test(loc.pathname)) return <Suspense fallback={<Loading />}><Routes><Route path="/reels" element={<Reels />} /><Route path="/reels/:id" element={<Reels />} /></Routes></Suspense>;
   return <Layout><Suspense fallback={<Loading />}><Routes>
     {legal}

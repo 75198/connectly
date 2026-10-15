@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, KIND_LABEL } from '../api';
+import { api, getFeatures, KIND_LABEL } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon, Sheet } from '../components/ui';
 
@@ -10,6 +10,7 @@ type MySpace = { id: number; kind: 'page' | 'group' | 'community'; slug: string;
 export function Hub() {
   const { me, refresh, logout } = useSession(); const nav = useNavigate();
   const [spaces, setSpaces] = useState<MySpace[] | null>(null); const [err, setErr] = useState(''); const [signout, setSignout] = useState(false);
+  const [ai, setAi] = useState(false); useEffect(() => { getFeatures().then((f) => setAi(!!f.ai_support)); }, []);
   useEffect(() => { api<{ items: MySpace[] }>('/me/spaces').then((r) => setSpaces(r.items)).catch((e) => setErr(e.message)); }, []);
   if (!me) return null;
   const pages = spaces?.filter((s) => s.kind === 'page' && ['owner', 'admin'].includes(s.role)) || [];
@@ -39,6 +40,7 @@ export function Hub() {
       <Link to="/me/deleted"><Icon name="trash" /> Recently deleted</Link>
       <Link to="/notifications"><Icon name="bell" /> Notifications</Link>
       <Link to="/market?mine=1"><Icon name="shop" /> Your listings</Link>
+      {ai && <Link to="/assistant"><Icon name="chat" /> Help &amp; support · Connectly Assistant</Link>}
       <Link to="/settings"><Icon name="gear" /> Privacy and settings</Link>
       {me.roles?.includes('admin') && <Link to="/admin"><Icon name="shield" /> Admin</Link>}
     </div>
