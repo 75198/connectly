@@ -36,11 +36,11 @@ export function Profile() {
   const { username = '' } = useParams();
   const [u, setU] = useState<User | null>(null); const [err, setErr] = useState(''); const [tab, setTab] = useState<'posts' | 'photos' | 'about'>('posts');
   const feed = usePosts(`/users/${encodeURIComponent(username)}/posts`);
+  const pinned = usePinned(username);
   useEffect(() => { setU(null); setErr(''); api<User>(`/users/${encodeURIComponent(username)}`).then(setU).catch((e) => setErr(e.message)); }, [username]);
   if (err) return <div className="card empty">{err}</div>;
   if (!u) return <div className="card profilehead skel" style={{ height: 360 }}><span className="sk block" /></div>;
   const work = [u.work_role, u.work_company].filter(Boolean).join(' at ');
-  const pinned = usePinned(username);
   const photos = feed.items.filter((p) => p.image_path || p.poster_path);
   return <div className="stack">
     <section className="card profilehead">

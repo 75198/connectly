@@ -147,7 +147,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       <button className="navbtn" onClick={toggleTheme}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /><span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span></button>
       <NavLink to="/me" className="mecard"><Avatar user={me!} size={36} /><span><b>{me!.full_name}</b><small>@{me!.username}</small></span></NavLink>
     </aside>
-    <main className="content">{children}</main>
+    <main className="content"><div key={loc.pathname} className="page-enter">{children}</div></main>
     <nav className="bottomnav">{items.map((i) => <NavLink key={i.to} to={i.to} end={i.end} aria-label={i.label} className={i.create ? 'createbtn' : ''}><Icon name={i.icon} /><span>{i.label}</span></NavLink>)}</nav>
   </div>;
 }

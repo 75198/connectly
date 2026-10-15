@@ -13,7 +13,8 @@
     "migrate": "node server/migrate.js",
     "seed": "node server/seed.js",
     "start": "node server/migrate.js && node server/index.js",
-    "test": "NODE_ENV=test node --test --test-concurrency=1 tests/"
+    "test": "NODE_ENV=test node --test --test-concurrency=1 tests/",
+    "test:e2e": "python3 scripts/e2e_routes.py ${E2E_BASE:-http://localhost:3000}"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
