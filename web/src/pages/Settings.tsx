@@ -13,7 +13,7 @@ export function Settings() {
       {me.roles?.includes('admin') && <Link to="/admin"><Icon name="shield" /> Admin</Link>}
       <button className="danger" onClick={async () => { await logout(); nav('/login'); }}><Icon name="logout" /> Log out</button>
     </div>
-    <div className="card"><h3>Coming in the next milestone</h3><p className="meta">Friends &amp; follows, notifications, sharing, reporting, messaging. These aren't clickable yet because they aren't built.</p></div>
+    <div className="card"><h3>Coming in the next milestone</h3><p className="meta">Friends &amp; follows, notifications, sharing, reporting and messaging are being built and will appear here when ready.</p></div>
     <p className="meta center">Signed in as @{me.username} · {me.email}</p>
   </div>;
 }

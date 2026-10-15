@@ -268,6 +268,19 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+  // ---------- search ----------
+  api.get('/search', requireAuth, async (req, res) => {
+    const { q: term, type, cursor } = z.object({ q: z.string().trim().min(1).max(100), type: z.enum(['people', 'posts']).default('people'), cursor: z.string().optional(), limit: z.string().optional() }).parse(req.query);
+    const like = '%' + term.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+    if (type === 'people') {
+      const { rows } = await q(`SELECT id, username, display_name, avatar_path, bio FROM users
+        WHERE email_verified_at IS NOT NULL AND (lower(username) || ' ' || lower(display_name)) LIKE $1
+        ORDER BY (lower(username) = lower($2)) DESC, (lower(username) LIKE lower($2) || '%') DESC, display_name LIMIT 20`, [like, term]);
+      return res.json({ items: rows, next_cursor: null });
+    }
+    res.json(await pagePosts(req.user.id, 'lower(p.body) LIKE $2', [like], cursor, req.query.limit));
+  });
+
   // ---------- admin ----------
   api.get('/admin/users', requireAdmin, async (_req, res) => {
     const { rows } = await q(`SELECT u.id, u.username, u.display_name, u.email, u.created_at, u.email_verified_at IS NOT NULL AS email_verified,

@@ -13,7 +13,7 @@ export function Avatar({ user, size = 40 }: { user: Pick<Author, 'display_name' 
 export function UserLink({ user }: { user: Author }) {
   return <Link to={`/u/${user.username}`} className="ulink">{user.display_name}</Link>;
 }
-export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' }) {
+export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' | 'search' }) {
   const p: Record<string, JSX.Element> = {
     home: <path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z" />,
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
@@ -30,6 +30,7 @@ export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shie
     lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 018 0v3" /></>,
     logout: <path d="M15 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4M10 8l-4 4 4 4M6 12h11" />,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
     more: <><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></>,
   };
   return <svg className="icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{p[name]}</svg>;

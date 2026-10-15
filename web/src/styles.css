@@ -92,3 +92,8 @@ label.btn{flex-direction:row}
 .tablewrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border)}
 .resetrow{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--border)}.resetrow input{font-size:.8rem}
 .codeinput{font-size:1.8rem;letter-spacing:.5em;text-align:center;font-variant-numeric:tabular-nums;padding:12px}
+.searchbox{flex-direction:row;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:999px;padding:0 14px;color:var(--muted)}
+.searchbox input{border:0;background:transparent;padding:11px 0}.searchbox input:focus{outline:none}.searchbox:focus-within{outline:2px solid var(--primary)}
+.tabs{display:flex;gap:6px}.tabs button{flex:1;border:0;background:none;padding:9px;border-radius:10px;font:inherit;font-weight:600;color:var(--muted);cursor:pointer}
+.tabs button.active{background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--primary)}
+.person span{display:flex;flex-direction:column;line-height:1.3}.person small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -6,6 +6,7 @@ import { Feed, Compose } from './pages/Feed';
 import { Profile, EditProfile } from './pages/Profile';
 import { Settings } from './pages/Settings';
 import { Admin } from './pages/Admin';
+import { Search } from './pages/Search';
 
 export function App() { return <SessionProvider><Router /></SessionProvider>; }
 
@@ -19,7 +20,7 @@ function Router() {
   </Routes>;
   if (!me.email_verified) return <Verify />;
   return <Layout><Routes>
-    <Route path="/" element={<Feed />} /><Route path="/compose" element={<Compose />} />
+    <Route path="/" element={<Feed />} /><Route path="/compose" element={<Compose />} /><Route path="/search" element={<Search />} />
     <Route path="/u/:username" element={<Profile />} /><Route path="/settings" element={<Settings />} />
     <Route path="/settings/profile" element={<EditProfile />} /><Route path="/admin" element={<Admin />} />
     <Route path="/login" element={<Navigate to="/" replace />} /><Route path="/register" element={<Navigate to="/" replace />} />
@@ -31,6 +32,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   const { me, theme, toggleTheme } = useSession();
   const items = [
     { to: '/', label: 'Home', icon: 'home' as const, end: true },
+    { to: '/search', label: 'Search', icon: 'search' as const },
     { to: '/compose', label: 'Create', icon: 'plus' as const },
     { to: `/u/${me!.username}`, label: 'Profile', icon: 'user' as const },
     ...(me!.roles?.includes('admin') ? [{ to: '/admin', label: 'Admin', icon: 'shield' as const }] : []),

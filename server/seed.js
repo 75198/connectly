@@ -1,4 +1,4 @@
-// Seeds demo accounts (alice, bob) and one admin. Idempotent.
+// Seeds the admin account (and demo users only if SEED_DEMO=1). Idempotent.
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
@@ -11,8 +11,11 @@ async function upsert(username, display, email, pw) {
   const r = await q('INSERT INTO users (username, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [username, display, email, await bcrypt.hash(pw, 12)]);
   return { id: r.rows[0].id, created: true };
 }
-await upsert('alice', 'Alice Adeyemi', 'alice@example.com', 'Connectly123!');
-await upsert('bob', 'Bob Okafor', 'bob@example.com', 'Connectly123!');
+// Demo accounts are for local development only (SEED_DEMO=1). Production seeds only the admin.
+if (process.env.SEED_DEMO === '1') {
+  await upsert('alice', 'Alice Adeyemi', 'alice@example.com', 'Connectly123!');
+  await upsert('bob', 'Bob Okafor', 'bob@example.com', 'Connectly123!');
+}
 const credFile = process.env.ADMIN_CREDENTIALS_FILE || 'ADMIN_CREDENTIALS.txt';
 let adminPw = process.env.ADMIN_PASSWORD;
 const exists = (await q("SELECT 1 FROM users WHERE username='admin'")).rows.length;

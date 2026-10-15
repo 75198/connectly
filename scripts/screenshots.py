@@ -1,4 +1,4 @@
-# Usage: python3 scripts/screenshots.py [BASE_URL]  -> screenshots/*.png
+# Needs a DB seeded with SEED_DEMO=1 (alice). Usage: python3 scripts/screenshots.py [BASE_URL]  -> screenshots/*.png
 import sys, os
 from playwright.sync_api import sync_playwright
 BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:3000'
@@ -24,6 +24,8 @@ with sync_playwright() as p:
         pg.goto(BASE + '/compose', wait_until='networkidle'); pg.wait_for_selector('textarea')
         pg.fill('textarea', 'Drafting a new post from the composer…')
         pg.screenshot(path=f'screenshots/{PREFIX}{tag}-composer.png')
+        pg.goto(BASE + '/search?q=a&type=people', wait_until='networkidle'); pg.wait_for_timeout(600)
+        pg.screenshot(path=f'screenshots/{PREFIX}{tag}-search.png')
         pg.goto(BASE + '/u/alice', wait_until='networkidle'); pg.wait_for_selector('h1'); pg.wait_for_timeout(600)
         pg.screenshot(path=f'screenshots/{PREFIX}{tag}-profile.png')
         if not mobile:

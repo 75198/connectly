@@ -226,6 +226,16 @@ test('cursor pagination has no duplicates or gaps', async () => {
   assert.equal(seen.length, rows[0].n);
 });
 
+test('search people and posts respects visibility', async () => {
+  let r = await B.get('/api/search?q=ali&type=people'); assert.equal(r.status, 200); assert.equal(r.body.items[0].username, 'alice');
+  r = await B.get('/api/search?q=fay&type=people'); assert.equal(r.body.items.length, 0, 'unverified users hidden');
+  r = await B.get('/api/search?q=%25&type=people'); assert.equal(r.body.items.length, 0, 'wildcards escaped');
+  r = await C.get('/api/search?q=diary&type=posts'); assert.equal(r.body.items.length, 0, 'private post not searchable by others');
+  r = await A.get('/api/search?q=diary&type=posts'); assert.equal(r.body.items.length, 1);
+  r = await C.get('/api/search?q=edited&type=posts'); assert.equal(r.body.items[0].id, pub.id);
+  r = await C.get('/api/search?q=&type=posts'); assert.equal(r.status, 400);
+});
+
 test('security headers present', async () => {
   const r = await request(app).get('/api/health');
   assert.equal(r.status, 200);
