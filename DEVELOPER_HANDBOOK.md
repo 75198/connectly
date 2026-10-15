@@ -58,7 +58,7 @@ Flags live in `server/config.js` → `config.features` and are read from env var
 |---|---|---|
 | `FEATURE_SIGNUP_POW` | 1 | Require the proof-of-work bot check on `/api/auth/register` |
 | `FEATURE_REPORTS` | 1 | Enable `POST /api/reports` |
-Other tunables: `POW_BITS` (default 18, about 1 s in a phone browser; raise it if bots get through).
+Other tunables: `POW_BITS` (default 17, about 1-3 s in a phone browser; raise it if bots get through).
 
 ## 7. Backups & restore
 - **Off-server (the real backup):** from your machine run `CODESPACE=<name> PASSFILE=<passphrase file> bash scripts/backup-offsite.sh <dest>`. It pulls a `pg_dump -Fc` and an uploads tarball, encrypts them with GnuPG AES256, and verifies checksums after decryption. Keep the passphrase outside the repo. The codespace cannot push backups off-server on its own without storing credentials, so schedule this script on your own machine (cron) or run it before every deploy.

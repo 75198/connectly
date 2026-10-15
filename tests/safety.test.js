@@ -115,3 +115,15 @@ test('migrations are versioned and additive (007+ never drop/delete/truncate/ren
     assert.doesNotMatch(sql, /ADD\s+COLUMN(?!\s+IF\s+NOT\s+EXISTS)[^;]*NOT\s+NULL(?![^;]*DEFAULT)/i, `${f}: NOT NULL columns need a DEFAULT`);
   }
 });
+
+test('browser proof-of-work worker produces solutions the server accepts', async () => {
+  const { transform } = await import('esbuild');
+  const src = fs.readFileSync(new URL('../web/src/lib/pow.worker.ts', import.meta.url), 'utf8');
+  const { code } = await transform(src, { loader: 'ts', format: 'esm' });
+  let out; const fakeSelf = { postMessage: (m) => { out = m; } };
+  new Function('self', code.replace(/^export\s*\{\s*\};?/m, ''))(fakeSelf);
+  const c = (await request(app).get('/api/auth/challenge')).body;
+  fakeSelf.onmessage({ data: c });
+  const { verifyPow } = await import('../server/pow.js');
+  assert.equal(await verifyPow(out), null);
+});

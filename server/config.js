@@ -19,7 +19,7 @@ export const config = {
     signupPow: (env.FEATURE_SIGNUP_POW ?? '1') !== '0',
     reports: (env.FEATURE_REPORTS ?? '1') !== '0',
   },
-  powBits: Number(env.POW_BITS || (isTest ? 4 : 18)),
+  powBits: Number(env.POW_BITS || (isTest ? 4 : 17)),
   codeSecret: env.CODE_SECRET || 'dev-only-secret',
   maxUploadBytes: 5 * 1024 * 1024,
 };
