@@ -4,6 +4,8 @@ import request from 'supertest';
 import sharp from 'sharp';
 import { createApp, pool } from '../server/app.js';
 import { migrate } from '../server/migrate.js';
+import { testOutbox } from '../server/mailer.js';
+const lastCode = (email) => [...testOutbox].reverse().find((m) => m.to === email)?.text.match(/\b(\d{6})\b/)[1];
 
 let app;
 const H = { 'X-Connectly-CSRF': '1' };
@@ -13,6 +15,8 @@ async function register(name) {
   const a = agent();
   const r = await post(a, '/api/auth/register').send({ username: name, display_name: name.toUpperCase(), email: `${name}@t.io`, password: 'Password123!' });
   assert.equal(r.status, 201, JSON.stringify(r.body));
+  const v = await post(a, '/api/auth/verify').send({ code: lastCode(`${name}@t.io`) });
+  assert.equal(v.status, 200, JSON.stringify(v.body));
   return a;
 }
 let png;
@@ -56,20 +60,53 @@ test('login, session cookie flags, me, logout', async () => {
   r = await request(app).get('/api/feed'); assert.equal(r.status, 401);
 });
 
-test('password reset token flow', async () => {
+test('email verification with 6-digit code: attempts, resend cooldown, unverified cannot post', async () => {
+  const a = agent();
+  let r = await post(a, '/api/auth/register').send({ username: 'dave', display_name: 'Dave', email: 'dave@t.io', password: 'Password123!' });
+  assert.equal(r.status, 201); assert.equal(r.body.needs_verification, true);
+  const code = lastCode('dave@t.io'); assert.match(code, /^\d{6}$/);
+  const { rows } = await pool.query("SELECT code_hash FROM email_codes ORDER BY id DESC LIMIT 1");
+  assert.notEqual(rows[0].code_hash, code, 'code stored hashed');
+  r = await a.get('/api/me'); assert.equal(r.body.email_verified, false);
+  r = await post(a, '/api/posts').field('body', 'hi'); assert.equal(r.status, 403); assert.equal(r.body.code, 'EMAIL_UNVERIFIED');
+  r = await post(a, '/api/auth/resend-verification'); assert.equal(r.status, 429, 'cooldown');
+  const wrong = code === '000000' ? '111111' : '000000';
+  r = await post(a, '/api/auth/verify').send({ code: 'abc' }); assert.equal(r.status, 400);
+  r = await post(a, '/api/auth/verify').send({ code: wrong }); assert.equal(r.body.reason, 'invalid');
+  r = await post(a, '/api/auth/verify').send({ code }); assert.equal(r.status, 200);
+  r = await a.get('/api/me'); assert.equal(r.body.email_verified, true);
+  r = await post(a, '/api/posts').field('body', 'hi'); assert.equal(r.status, 201);
+  // lockout after 5 wrong attempts, then resend after cooldown issues a working code
+  const e = agent();
+  await post(e, '/api/auth/register').send({ username: 'erin', display_name: 'Erin', email: 'erin@t.io', password: 'Password123!' });
+  const ecode = lastCode('erin@t.io'); const bad = ecode === '999999' ? '888888' : '999999';
+  for (let i = 0; i < 4; i++) { r = await post(e, '/api/auth/verify').send({ code: bad }); assert.equal(r.body.reason, 'invalid'); }
+  r = await post(e, '/api/auth/verify').send({ code: bad }); assert.equal(r.body.reason, 'locked');
+  r = await post(e, '/api/auth/verify').send({ code: ecode }); assert.equal(r.status, 400, 'locked code no longer works');
+  await pool.query("UPDATE email_codes SET created_at = now() - interval '2 minutes'");
+  r = await post(e, '/api/auth/resend-verification'); assert.equal(r.status, 200);
+  r = await post(e, '/api/auth/verify').send({ code: lastCode('erin@t.io') }); assert.equal(r.status, 200);
+  // expiry
+  const f = agent();
+  await post(f, '/api/auth/register').send({ username: 'fay', display_name: 'Fay', email: 'fay@t.io', password: 'Password123!' });
+  await pool.query("UPDATE email_codes SET expires_at = now() - interval '1 second' WHERE user_id = (SELECT id FROM users WHERE username='fay')");
+  r = await post(f, '/api/auth/verify').send({ code: lastCode('fay@t.io') }); assert.equal(r.body.reason, 'expired');
+});
+
+test('password reset with 6-digit code', async () => {
   let r = await post(agent(), '/api/auth/forgot').send({ email: 'carol@t.io' });
   assert.equal(r.status, 200);
   r = await post(agent(), '/api/auth/forgot').send({ email: 'nobody@t.io' });
   assert.equal(r.status, 200); // no account enumeration
-  const { rows } = await pool.query("SELECT reset_url FROM password_resets ORDER BY id DESC LIMIT 1");
-  const token = new URL(rows[0].reset_url).searchParams.get('token');
-  r = await post(agent(), '/api/auth/reset').send({ token: 'x'.repeat(40), password: 'NewPassword1!' });
+  const code = lastCode('carol@t.io');
+  const wrong = code === '123456' ? '654321' : '123456';
+  r = await post(agent(), '/api/auth/reset').send({ email: 'carol@t.io', code: wrong, password: 'NewPassword1!' });
   assert.equal(r.status, 400);
-  r = await post(agent(), '/api/auth/reset').send({ token, password: 'NewPassword1!' });
+  r = await post(agent(), '/api/auth/reset').send({ email: 'carol@t.io', code, password: 'NewPassword1!' });
   assert.equal(r.status, 200);
-  r = await post(agent(), '/api/auth/reset').send({ token, password: 'Another123!' });
-  assert.equal(r.status, 400, 'token single use');
-  r = await (await C.get('/api/me')); assert.equal(r.status, 401, 'old sessions revoked');
+  r = await post(agent(), '/api/auth/reset').send({ email: 'carol@t.io', code, password: 'Another123!' });
+  assert.equal(r.status, 400, 'code single use');
+  r = await C.get('/api/me'); assert.equal(r.status, 401, 'old sessions revoked');
   C = agent();
   r = await post(C, '/api/auth/login').send({ login: 'carol', password: 'NewPassword1!' });
   assert.equal(r.status, 200);
@@ -93,7 +130,7 @@ test('admin can grant roles and see reset links', async () => {
   const { rows } = await pool.query("SELECT id FROM users WHERE username='carol'");
   await pool.query("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name='admin'", [rows[0].id]);
   let r = await C.get('/api/admin/users'); assert.equal(r.status, 200); assert.ok(r.body.items.length >= 3);
-  r = await C.get('/api/admin/password-resets'); assert.equal(r.status, 200);
+  r = await C.get('/api/admin/status'); assert.equal(r.status, 200); assert.equal(typeof r.body.smtp_configured, 'boolean');
   r = await post(C, '/api/admin/users/2/roles').send({ role: 'moderator' }); assert.equal(r.status, 200);
   r = await C.delete(`/api/admin/users/${rows[0].id}/roles/admin`).set(H); assert.equal(r.status, 400);
 });

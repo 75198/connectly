@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { z, ZodError } from 'zod';
 import { q, pool } from './db.js';
 import { config } from './config.js';
-import { loadUser, requireAuth, requireAdmin, csrfGuard, createSession, destroySession, sha256, randomToken } from './auth.js';
+import { issueCode, consumeCode, CODE_ERRORS } from './codes.js';
+import { smtpConfigured } from './mailer.js';
+import { loadUser, requireVerified, requireAuth, requireAdmin, csrfGuard, createSession, destroySession } from './auth.js';
 import { upload, saveImage, removeImage, HttpError } from './uploads.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -93,7 +95,8 @@ export function createApp() {
     try {
       const { rows } = await q('INSERT INTO users (username, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING id', [d.username, d.display_name, d.email, hash]);
       await createSession(res, rows[0].id, req.get('user-agent'));
-      res.status(201).json({ id: rows[0].id, username: d.username });
+      await issueCode({ id: rows[0].id, email: d.email }, 'verify_email');
+      res.status(201).json({ id: rows[0].id, username: d.username, needs_verification: true });
     } catch (e) {
       if (e.code === '23505') return res.status(409).json({ error: e.constraint === 'users_email_lower' ? 'Email already registered' : 'Username already taken' });
       throw e;
@@ -108,32 +111,45 @@ export function createApp() {
     res.json({ ok: true });
   });
   api.post('/auth/logout', async (req, res) => { await destroySession(req, res); res.json({ ok: true }); });
+  const Code = z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code');
+  api.post('/auth/verify', authLimiter, requireAuth, async (req, res) => {
+    const { code } = z.object({ code: Code }).strict().parse(req.body);
+    if (req.user.email_verified_at) return res.json({ ok: true, already: true });
+    const r = await consumeCode(req.user.id, 'verify_email', code);
+    if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
+    await q('UPDATE users SET email_verified_at = now() WHERE id = $1', [req.user.id]);
+    res.json({ ok: true });
+  });
+  api.post('/auth/resend-verification', authLimiter, requireAuth, async (req, res) => {
+    if (req.user.email_verified_at) return res.status(400).json({ error: 'Email already verified' });
+    const r = await issueCode(req.user, 'verify_email');
+    if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter });
+    res.json({ ok: true });
+  });
   api.post('/auth/forgot', authLimiter, async (req, res) => {
     const { email } = z.object({ email: z.string().trim().toLowerCase().email() }).strict().parse(req.body);
-    const { rows } = await q('SELECT id FROM users WHERE lower(email) = $1', [email]);
+    const { rows } = await q('SELECT id, email FROM users WHERE lower(email) = $1', [email]);
     if (rows[0]) {
-      const token = randomToken();
-      const url = `${config.appUrl}/reset?token=${token}`;
-      await q("INSERT INTO password_resets (user_id, token_hash, reset_url, expires_at) VALUES ($1,$2,$3, now() + interval '1 hour')", [rows[0].id, sha256(token), url]);
-      // EMAIL DELIVERY NOT CONFIGURED (Milestone 1): link is logged server-side and visible to admins.
-      if (!config.isTest) console.log(`[password-reset] user=${rows[0].id} link=${url}`);
+      const r = await issueCode(rows[0], 'reset_password');
+      if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter });
     }
-    res.json({ ok: true, message: 'If that email is registered, a reset link has been issued.' });
+    res.json({ ok: true, message: 'If that email is registered, a 6-digit code has been sent.' });
   });
   api.post('/auth/reset', authLimiter, async (req, res) => {
-    const d = z.object({ token: z.string().min(10).max(200), password }).strict().parse(req.body);
-    const { rows } = await q('SELECT id, user_id FROM password_resets WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()', [sha256(d.token)]);
-    if (!rows[0]) return res.status(400).json({ error: 'Reset link is invalid or expired' });
+    const d = z.object({ email: z.string().trim().toLowerCase().email(), code: Code, password }).strict().parse(req.body);
+    const { rows } = await q('SELECT id FROM users WHERE lower(email) = $1', [d.email]);
+    const r = rows[0] ? await consumeCode(rows[0].id, 'reset_password', d.code) : 'expired';
+    if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
     const hash = await bcrypt.hash(d.password, BCRYPT_COST);
-    await q('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [hash, rows[0].user_id]);
-    await q('UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL', [rows[0].user_id]);
-    await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].user_id]);
+    // Receiving the code proves email ownership, so this also verifies the email.
+    await q('UPDATE users SET password_hash = $1, email_verified_at = COALESCE(email_verified_at, now()), updated_at = now() WHERE id = $2', [hash, rows[0].id]);
+    await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].id]);
     res.json({ ok: true });
   });
 
   api.get('/me', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT * FROM users WHERE id = $1', [req.user.id]);
-    res.json({ ...publicUser(rows[0]), email: rows[0].email, roles: req.user.roles });
+    res.json({ ...publicUser(rows[0]), email: rows[0].email, email_verified: Boolean(rows[0].email_verified_at), roles: req.user.roles });
   });
 
   // ---------- profiles ----------
@@ -174,7 +190,7 @@ export function createApp() {
 
   // ---------- posts ----------
   api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, null, [], req.query.cursor, req.query.limit)));
-  api.post('/posts', requireAuth, upload.single('image'), async (req, res) => {
+  api.post('/posts', requireVerified, upload.single('image'), async (req, res) => {
     const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined });
     if (!d.body && !req.file) return res.status(400).json({ error: 'Write something or add a photo' });
     const img = req.file ? await saveImage(req.file.buffer, 'post') : null;
@@ -192,7 +208,7 @@ export function createApp() {
     if (rows[0].author_id !== req.user.id) { res.status(403).json({ error: 'You can only change your own posts' }); return null; }
     return rows[0];
   };
-  api.patch('/posts/:id', requireAuth, async (req, res) => {
+  api.patch('/posts/:id', requireVerified, async (req, res) => {
     const d = PostEditSchema.parse(req.body);
     const post = await ownPost(req, res); if (!post) return;
     const body = d.body ?? post.body;
@@ -231,7 +247,7 @@ export function createApp() {
       FROM comments c JOIN users u ON u.id = c.author_id WHERE c.post_id = $1 ORDER BY c.id ASC LIMIT 500`, [p.id]);
     res.json({ items: rows });
   });
-  api.post('/posts/:id/comments', requireAuth, async (req, res) => {
+  api.post('/posts/:id/comments', requireVerified, async (req, res) => {
     const d = CommentSchema.parse(req.body);
     const p = await getVisiblePost(req.user.id, id(req.params.id));
     if (!p) return res.status(404).json({ error: 'Post not found' });
@@ -254,15 +270,13 @@ export function createApp() {
 
   // ---------- admin ----------
   api.get('/admin/users', requireAdmin, async (_req, res) => {
-    const { rows } = await q(`SELECT u.id, u.username, u.display_name, u.email, u.created_at,
+    const { rows } = await q(`SELECT u.id, u.username, u.display_name, u.email, u.created_at, u.email_verified_at IS NOT NULL AS email_verified,
       COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
       FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id GROUP BY u.id ORDER BY u.id LIMIT 500`);
     res.json({ items: rows });
   });
-  api.get('/admin/password-resets', requireAdmin, async (_req, res) => {
-    const { rows } = await q(`SELECT pr.id, u.username, u.email, pr.reset_url, pr.created_at, pr.expires_at FROM password_resets pr JOIN users u ON u.id = pr.user_id
-      WHERE pr.used_at IS NULL AND pr.expires_at > now() ORDER BY pr.id DESC LIMIT 100`);
-    res.json({ items: rows, note: 'Email delivery is not configured; share these links with users manually.' });
+  api.get('/admin/status', requireAdmin, async (_req, res) => {
+    res.json({ smtp_configured: smtpConfigured, note: smtpConfigured ? 'Emails are sent via SMTP.' : 'SMTP is not configured: confirmation and reset codes are only written to the server log (/tmp/app.log).' });
   });
   api.post('/admin/users/:id/roles', requireAdmin, async (req, res) => {
     const { role } = z.object({ role: z.enum(['admin', 'moderator']) }).strict().parse(req.body);

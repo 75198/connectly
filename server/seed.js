@@ -23,5 +23,6 @@ if (admin.created) {
   console.log('admin created; credentials written to', credFile);
 }
 await q("INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE name='admin' ON CONFLICT DO NOTHING", [admin.id]);
+await q("UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()) WHERE username IN ('alice','bob','admin')");
 console.log('seed complete');
 await pool.end();

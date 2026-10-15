@@ -49,26 +49,46 @@ export function Register() {
 }
 
 export function Forgot() {
-  const [email, setEmail] = useState(''); const [sent, setSent] = useState(false);
-  const f = useForm(async () => { await api('/auth/forgot', { json: { email } }); setSent(true); });
+  const nav = useNavigate();
+  const [email, setEmail] = useState(''); const [step, setStep] = useState<'email' | 'code'>('email');
+  const [code, setCode] = useState(''); const [pw, setPw] = useState(''); const [info, setInfo] = useState('');
+  const send = useForm(async () => { await api('/auth/forgot', { json: { email } }); setStep('code'); setInfo(`If ${email} is registered, we've emailed a 6-digit code.`); });
+  const reset = useForm(async () => { await api('/auth/reset', { json: { email, code, password: pw } }); alert('Password changed. Please log in.'); nav('/login'); });
   return <Shell title="Reset your password">
-    {sent ? <div className="stack"><p>If that email is registered, a reset link has been created.</p>
-      <p className="notice">Email delivery isn't set up yet on this server, so the link isn't emailed. Ask the site admin — they can see pending reset links in the Admin page.</p></div>
-      : <form className="stack" onSubmit={f.submit}><label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-        {f.err && <p className="error">{f.err}</p>}<button className="btn primary block" disabled={f.busy}>Get reset link</button></form>}
+    {step === 'email' ? <form className="stack" onSubmit={send.submit}>
+      <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" /></label>
+      {send.err && <p className="error">{send.err}</p>}<button className="btn primary block" disabled={send.busy}>Send code</button></form>
+    : <form className="stack" onSubmit={reset.submit}>
+      <p className="meta">{info}</p>
+      <label>6-digit code<CodeInput value={code} onChange={setCode} /></label>
+      <label>New password<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} minLength={8} required autoComplete="new-password" /></label>
+      {reset.err && <p className="error">{reset.err}</p>}
+      <button className="btn primary block" disabled={reset.busy || code.length !== 6}>Change password</button>
+      <button type="button" className="linkish" onClick={() => send.submit({ preventDefault() {} } as any)}>Send a new code</button>
+      {send.err && <p className="error">{send.err}</p>}
+    </form>}
     <p className="center"><Link to="/login">Back to log in</Link></p>
   </Shell>;
 }
 
-export function Reset() {
-  const [sp] = useSearchParams(); const nav = useNavigate();
-  const [pw, setPw] = useState(''); const [pw2, setPw2] = useState('');
-  const f = useForm(async () => { if (pw !== pw2) throw new Error('Passwords do not match'); await api('/auth/reset', { json: { token: sp.get('token') || '', password: pw } }); nav('/login'); alert('Password changed. Please log in.'); });
-  return <Shell title="Choose a new password">
-    <form className="stack" onSubmit={f.submit}>
-      <label>New password<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} minLength={8} required autoComplete="new-password" /></label>
-      <label>Confirm password<input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} minLength={8} required autoComplete="new-password" /></label>
-      {f.err && <p className="error">{f.err}</p>}<button className="btn primary block" disabled={f.busy}>Save password</button>
+export function CodeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return <input className="codeinput" value={value} onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} placeholder="••••••" required />;
+}
+
+export function Verify() {
+  const { me, refresh, logout } = useSession();
+  const [code, setCode] = useState(''); const [msg, setMsg] = useState('');
+  const verify = useForm(async () => { await api('/auth/verify', { json: { code } }); await refresh(); });
+  const resend = useForm(async () => { setMsg(''); await api('/auth/resend-verification', { method: 'POST' }); setMsg('A new code is on its way.'); });
+  return <Shell title="Verify your email">
+    <form className="stack" onSubmit={verify.submit}>
+      <p>We sent a 6-digit code to <b>{me?.email}</b>. Enter it below to activate your account. The code expires in 10 minutes.</p>
+      <CodeInput value={code} onChange={setCode} />
+      {verify.err && <p className="error">{verify.err}</p>}
+      <button className="btn primary block" disabled={verify.busy || code.length !== 6}>{verify.busy ? 'Checking…' : 'Verify'}</button>
     </form>
+    <p className="center"><button className="linkish" disabled={resend.busy} onClick={resend.submit as any}>Resend code</button></p>
+    {resend.err && <p className="error center">{resend.err}</p>}{msg && <p className="success center">{msg}</p>}
+    <hr /><p className="center meta">Wrong email? <button className="linkish" onClick={logout}>Log out</button> and sign up again.</p>
   </Shell>;
 }

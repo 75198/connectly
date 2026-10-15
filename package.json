@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev:api": "node --watch server/index.js",
     "dev:web": "vite --config web/vite.config.ts",
@@ -21,6 +23,7 @@
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
     "multer": "^2.0.0",
+    "nodemailer": "^10.1.1",
     "pg": "^8.13.1",
     "sharp": "^0.33.5",
     "zod": "^3.23.8"

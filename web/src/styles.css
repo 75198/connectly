@@ -91,3 +91,4 @@ label.btn{flex-direction:row}
 .list a:hover,.list button:hover{background:color-mix(in srgb,var(--text) 6%,transparent);text-decoration:none}
 .tablewrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border)}
 .resetrow{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--border)}.resetrow input{font-size:.8rem}
+.codeinput{font-size:1.8rem;letter-spacing:.5em;text-align:center;font-variant-numeric:tabular-nums;padding:12px}

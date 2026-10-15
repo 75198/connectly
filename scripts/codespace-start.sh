@@ -23,6 +23,7 @@ if ! $PSQL -tc "SELECT 1 FROM pg_roles WHERE rolname='connectly'" | grep -q 1; t
   echo "DATABASE_URL=postgres://connectly:$PW@localhost:5433/connectly" >> .env
 fi
 unset PGPASSWORD
+grep -q '^CODE_SECRET=' .env || echo "CODE_SECRET=$(openssl rand -hex 32)" >> .env
 if ! grep -q '^APP_URL=' .env; then
   echo "APP_URL=https://${CODESPACE_NAME:?set CODESPACE_NAME}-3000.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}" >> .env
   printf 'PORT=3000\nNODE_ENV=production\nCOOKIE_SECURE=true\nUPLOAD_DIR=./uploads\n' >> .env

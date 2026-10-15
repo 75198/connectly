@@ -11,4 +11,4 @@ An original social network: Node 20 + Express 5 + PostgreSQL REST API (`/api`) a
 bcrypt (cost 12) passwords; opaque session tokens stored hashed in Postgres, sent as an `HttpOnly; Secure; SameSite=Strict` cookie; CSRF header + Origin check on every write; helmet (CSP etc.); rate limits on auth (20 per 15 min) and writes; zod validation with strict schemas; ownership checks and visibility filtering done in SQL; uploads limited to 5 MB images and re-encoded to WebP with sharp (EXIF stripped).
 
 ## Needs configuration (not in Milestone 1)
-* **Email delivery**: password-reset links are logged to the server log and shown to admins on the Admin page.
+* **Email delivery**: signup confirmation and password-reset use 6-digit codes (HMAC-hashed, 10-min expiry, 5 attempts, 60s resend cooldown). Set SMTP_HOST/PORT/USER/PASS/FROM (e.g. Brevo) in `.env`; until then codes are only printed in the server log (`/tmp/app.log`, lines starting `[mail:NOT-CONFIGURED]`).

@@ -1,7 +1,7 @@
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { SessionProvider, useSession } from './session';
 import { Icon, Logo, Avatar } from './components/ui';
-import { Login, Register, Forgot, Reset } from './pages/Auth';
+import { Login, Register, Forgot, Verify } from './pages/Auth';
 import { Feed, Compose } from './pages/Feed';
 import { Profile, EditProfile } from './pages/Profile';
 import { Settings } from './pages/Settings';
@@ -14,14 +14,14 @@ function Router() {
   if (loading) return <div className="splash"><Logo size={64} /></div>;
   if (!me) return <Routes>
     <Route path="/login" element={<Login />} /><Route path="/register" element={<Register />} />
-    <Route path="/forgot" element={<Forgot />} /><Route path="/reset" element={<Reset />} />
+    <Route path="/forgot" element={<Forgot />} />
     <Route path="*" element={<Navigate to="/login" replace state={{ from: loc.pathname }} />} />
   </Routes>;
+  if (!me.email_verified) return <Verify />;
   return <Layout><Routes>
     <Route path="/" element={<Feed />} /><Route path="/compose" element={<Compose />} />
     <Route path="/u/:username" element={<Profile />} /><Route path="/settings" element={<Settings />} />
     <Route path="/settings/profile" element={<EditProfile />} /><Route path="/admin" element={<Admin />} />
-    <Route path="/reset" element={<Reset />} />
     <Route path="/login" element={<Navigate to="/" replace />} /><Route path="/register" element={<Navigate to="/" replace />} />
     <Route path="*" element={<div className="card empty">Page not found. <NavLink to="/">Go home</NavLink></div>} />
   </Routes></Layout>;
