@@ -1,5 +1,7 @@
 # Connectly — Milestone 1
 
+See **[DEVELOPER_HANDBOOK.md](DEVELOPER_HANDBOOK.md)** for architecture, deploy, migrations, backups and security rules.
+
 An original social network: Node 20 + Express 5 + PostgreSQL REST API (`/api`) and a React + Vite + TypeScript web client (`web/`). The API is client-agnostic, so iOS/Android apps can reuse it later.
 
 * Branding (name, logo, colours): `web/src/brand.ts` and `web/public/logo.svg`

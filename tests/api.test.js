@@ -6,6 +6,7 @@ import { createApp, pool } from '../server/app.js';
 import { migrate } from '../server/migrate.js';
 import { testOutbox } from '../server/mailer.js';
 import { testSmsOutbox } from '../server/sms.js';
+import { powFor } from './pow-helper.js';
 const lastCode = (email) => [...testOutbox].reverse().find((m) => m.to === email)?.text.match(/\b(\d{6})\b/)[1];
 
 let app;
@@ -13,7 +14,7 @@ const H = { 'X-Connectly-CSRF': '1' };
 const agent = () => { const a = request.agent(app); return a; };
 const post = (a, url) => a.post(url).set(H);
 const DOB = '1995-05-05';
-const signup = (a, email, extra = {}) => post(a, '/api/auth/register').send({ identifier: email, password: 'Password123!', full_name: 'Test Person', birth_date: DOB, accept_terms: true, ...extra });
+const signup = async (a, email, extra = {}) => { const pow = await powFor(a); const r = await post(a, '/api/auth/register').send({ identifier: email, password: 'Password123!', full_name: 'Test Person', birth_date: DOB, accept_terms: true, pow, ...extra }); return r; };
 async function register(name) {
   const a = agent();
   const email = `${name}@t.io`;

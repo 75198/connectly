@@ -313,7 +313,7 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
   });
   api.get('/me/sessions', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT id, user_agent, approx_location, created_at, last_seen_at, (id = $2) AS current FROM sessions WHERE user_id = $1 AND expires_at > now() ORDER BY (id = $2) DESC, last_seen_at DESC', [req.user.id, req.user.session_id]);
-    const { rows: saved } = await q('SELECT left(device_hash, 16) AS id, user_agent, created_at, last_used_at FROM saved_logins WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    const { rows: saved } = await q('SELECT left(device_hash, 16) AS id, user_agent, created_at, last_used_at, expires_at FROM saved_logins WHERE user_id = $1 AND expires_at > now() ORDER BY created_at DESC', [req.user.id]);
     res.json({ items: rows, saved_devices: saved });
   });
   api.delete('/me/sessions/:id', requireAuth, async (req, res) => {
@@ -322,7 +322,10 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
   });
   api.post('/me/sessions/logout-others', requireAuth, async (req, res) => {
     const r = await q('DELETE FROM sessions WHERE user_id = $1 AND id <> $2', [req.user.id, req.user.session_id]);
-    res.json({ ok: true, ended: r.rowCount });
+    // also forget this account on every other device's "saved logins" (this device's entry is kept)
+    const dev = req.cookies?.[DEVICE_COOKIE];
+    const s = await q('DELETE FROM saved_logins WHERE user_id = $1 AND device_hash <> $2', [req.user.id, dev ? sha256(dev) : '']);
+    res.json({ ok: true, ended: r.rowCount, saved_removed: s.rowCount });
   });
   api.delete('/me/saved-devices/:id', requireAuth, async (req, res) => {
     const prefix = z.string().regex(/^[a-f0-9]{16}$/).parse(req.params.id);
@@ -341,7 +344,7 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
       let dev = req.cookies?.[DEVICE_COOKIE];
       if (!dev || !/^[A-Za-z0-9_-]{40,}$/.test(dev)) { dev = randomToken(); }
       res.cookie(DEVICE_COOKIE, dev, deviceCookieOpts());
-      await q(`INSERT INTO saved_logins (device_hash, user_id, user_agent) VALUES ($1,$2,$3) ON CONFLICT (device_hash, user_id) DO UPDATE SET created_at = now()`, [sha256(dev), req.user.id, (req.get('user-agent') || '').slice(0, 300)]);
+      await q(`INSERT INTO saved_logins (device_hash, user_id, user_agent, expires_at) VALUES ($1,$2,$3, now() + make_interval(days => ${config.savedLoginDays})) ON CONFLICT (device_hash, user_id) DO UPDATE SET created_at = now(), expires_at = now() + make_interval(days => ${config.savedLoginDays})`, [sha256(dev), req.user.id, (req.get('user-agent') || '').slice(0, 300)]);
     }
     await destroySession(req, res);
     res.json({ ok: true, saved: Boolean(save && req.user) });
@@ -350,16 +353,16 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
   api.get('/auth/saved', async (req, res) => {
     const h = deviceHash(req); if (!h) return res.json({ items: [] });
     const { rows } = await q(`SELECT u.id, u.username, u.full_name, u.avatar_path FROM saved_logins s JOIN users u ON u.id = s.user_id
-      WHERE s.device_hash = $1 AND u.email_verified_at IS NOT NULL ORDER BY s.last_used_at DESC NULLS LAST, s.created_at DESC LIMIT 10`, [h]);
+      WHERE s.device_hash = $1 AND s.expires_at > now() AND u.email_verified_at IS NOT NULL AND u.suspended_at IS NULL ORDER BY s.last_used_at DESC NULLS LAST, s.created_at DESC LIMIT 10`, [h]);
     res.json({ items: rows });
   });
   api.post('/auth/saved/login', async (req, res) => {
     const { user_id } = z.object({ user_id: z.number().int().positive() }).strict().parse(req.body);
     const h = deviceHash(req);
-    const { rows } = h ? await q('SELECT u.id, u.deactivated_at FROM saved_logins s JOIN users u ON u.id = s.user_id WHERE s.device_hash = $1 AND s.user_id = $2 AND u.email_verified_at IS NOT NULL', [h, user_id]) : { rows: [] };
+    const { rows } = h ? await q('SELECT u.id, u.deactivated_at FROM saved_logins s JOIN users u ON u.id = s.user_id WHERE s.device_hash = $1 AND s.user_id = $2 AND s.expires_at > now() AND u.email_verified_at IS NOT NULL AND u.suspended_at IS NULL', [h, user_id]) : { rows: [] };
     if (!rows[0]) return res.status(401).json({ error: 'This saved login is no longer valid. Please log in with your password.' });
     if (rows[0].deactivated_at) await q('UPDATE users SET deactivated_at = NULL WHERE id = $1', [user_id]);
-    await q('UPDATE saved_logins SET last_used_at = now() WHERE device_hash = $1 AND user_id = $2', [h, user_id]);
+    await q('UPDATE saved_logins SET last_used_at = now(), expires_at = now() + make_interval(days => $3) WHERE device_hash = $1 AND user_id = $2', [h, user_id, config.savedLoginDays]);
     await createSession(res, user_id, req.get('user-agent'), req, 'saved_login');
     res.json({ ok: true });
   });

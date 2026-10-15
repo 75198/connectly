@@ -12,6 +12,14 @@ export const config = {
   appUrl: env.APP_URL || 'http://localhost:3000',
   cookieSecure: env.COOKIE_SECURE === 'true',
   uploadDir: path.resolve(env.UPLOAD_DIR || (isTest ? './.test-uploads' : './uploads')),
-  sessionDays: 30,
+  sessionDays: 60, // sliding: extended on activity (see auth.js loadUser)
+  savedLoginDays: 60, // sliding: extended each time the saved login is used
+  // Feature flags: FEATURE_<NAME>=0/1 in .env. Default values here. See DEVELOPER_HANDBOOK.md.
+  features: {
+    signupPow: (env.FEATURE_SIGNUP_POW ?? '1') !== '0',
+    reports: (env.FEATURE_REPORTS ?? '1') !== '0',
+  },
+  powBits: Number(env.POW_BITS || (isTest ? 4 : 18)),
+  codeSecret: env.CODE_SECRET || 'dev-only-secret',
   maxUploadBytes: 5 * 1024 * 1024,
 };

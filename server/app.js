@@ -14,9 +14,10 @@ import { issueCode, consumeCode, CODE_ERRORS, keyOf, createTicket, readTicket, u
 import { smtpConfigured, sendMail } from './mailer.js';
 import { smsConfigured } from './sms.js';
 import { parseIdentifier, identCol, FullName, BirthDate, generateUsername } from './identity.js';
-import { loadUser, requireVerified, requireAuth, requireAdmin, csrfGuard, createSession, destroySession } from './auth.js';
+import { loadUser, requireVerified, requireAuth, requireAdmin, requireModerator, csrfGuard, createSession, destroySession } from './auth.js';
 import { upload, saveImage, removeImage, HttpError } from './uploads.js';
 import { notify, registerSocial } from './social.js';
+import { newChallenge, verifyPow } from './pow.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BCRYPT_COST = config.isTest ? 4 : 12;
@@ -60,6 +61,7 @@ const id = (v) => { const n = Number(v); if (!Number.isSafeInteger(n) || n <= 0)
 const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility = 'friends' AND EXISTS (
   SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND
    ((f.requester_id = $1 AND f.addressee_id = p.author_id) OR (f.addressee_id = $1 AND f.requester_id = p.author_id)))))
+  AND p.hidden_at IS NULL AND NOT EXISTS (SELECT 1 FROM users su WHERE su.id = p.author_id AND su.suspended_at IS NOT NULL)
   AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $1))`;
 // author of a post/comment: the page when posted "as a page", otherwise the user
 const authorJson = (alias, userAlias) => `CASE WHEN ${alias}.as_space_id IS NOT NULL THEN (SELECT json_build_object('id', s.id, 'username', s.slug, 'full_name', s.name, 'avatar_path', s.photo_path, 'space', true, 'kind', s.kind) FROM spaces s WHERE s.id = ${alias}.as_space_id)
@@ -106,7 +108,15 @@ export function createApp() {
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
-  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: config.isTest ? 10000 : 20, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again in 15 minutes' } });
+  // Rate limits (per client IP; trust proxy = 1 so the Codespaces/edge proxy's X-Forwarded-For is used).
+  const lim = (windowMin, max, error, extra = {}) => rateLimit({ windowMs: windowMin * 60 * 1000, limit: config.isTest ? 10000 : max, standardHeaders: 'draft-7', legacyHeaders: false, message: { error }, ...extra });
+  const authLimiter = lim(15, 20, 'Too many attempts, try again in 15 minutes');
+  const loginLimiter = lim(15, 10, 'Too many login attempts, try again in 15 minutes');
+  // second login limiter keyed by the account identifier, so one account can't be brute-forced from many IPs
+  const loginIdLimiter = lim(15, 10, 'Too many login attempts for this account, try again in 15 minutes', { keyGenerator: (req) => 'id:' + String(req.body?.login || '').trim().toLowerCase().slice(0, 200) });
+  const signupLimiter = lim(60, 5, 'Too many sign-ups from your network, try again in an hour');
+  const codeLimiter = lim(15, 8, 'Too many code requests, try again in 15 minutes');
+  const reportLimiter = lim(60, 20, 'Too many reports, try again later');
   const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: config.isTest ? 10000 : 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Slow down a little' } });
 
   const api = express.Router();
@@ -123,7 +133,8 @@ export function createApp() {
   const requireChannel = (id) => {
     if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
   };
-  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13 }));
+  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow }));
+  api.get('/auth/challenge', authLimiter, (_req, res) => res.json(newChallenge()));
   const MAX_ACCOUNTS = 10;
   const accountsFor = async (id, { verifiedOnly = true } = {}) => (await q(
     `SELECT id, username, full_name, avatar_path, email, phone, password_hash, email_verified_at, deactivated_at FROM users WHERE ${identCol(id)} = $1 ${verifiedOnly ? 'AND email_verified_at IS NOT NULL' : ''} ORDER BY id LIMIT 50`, [id.value])).rows;
@@ -142,8 +153,10 @@ export function createApp() {
     if (d.password && await matchPassword(accts, d.password)) return res.status(409).json(SAME);
     res.json({ ok: true, type: id.type, normalized: id.value });
   });
-  api.post('/auth/register', authLimiter, async (req, res) => {
-    const d = Ident.extend({ password, full_name: FullName, birth_date: BirthDate, accept_terms: z.literal(true, { errorMap: () => ({ message: 'You must agree to the Terms to continue' }) }) }).strict().parse(req.body);
+  api.post('/auth/register', signupLimiter, async (req, res) => {
+    const d = Ident.extend({ password, full_name: FullName, birth_date: BirthDate, accept_terms: z.literal(true, { errorMap: () => ({ message: 'You must agree to the Terms to continue' }) }), pow: z.object({ challenge: z.string().max(300), solution: z.string().max(20) }).strict().optional() }).strict().parse(req.body);
+    const powErr = await verifyPow(d.pow);
+    if (powErr) return res.status(400).json({ error: powErr, code: 'POW_REQUIRED' });
     const id = parseIdentifier(d.identifier, d.country);
     requireChannel(id);
     const accts = await accountsFor(id);
@@ -169,7 +182,7 @@ export function createApp() {
   });
   const Code = z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code');
   const pendingFor = async (id) => (await q(`SELECT id, email, full_name FROM users WHERE ${identCol(id)} = $1 AND email_verified_at IS NULL ORDER BY id DESC LIMIT 1`, [id.value])).rows[0];
-  api.post('/auth/verify', authLimiter, async (req, res) => {
+  api.post('/auth/verify', codeLimiter, async (req, res) => {
     const d = Ident.extend({ code: Code }).strict().parse(req.body);
     const id = parseIdentifier(d.identifier, d.country);
     const u = await pendingFor(id);
@@ -181,7 +194,7 @@ export function createApp() {
     if (u.email) sendMail({ to: u.email, subject: 'Welcome to Connectly', text: welcomeText(u.full_name) }).catch((e) => console.error('[welcome]', e.message));
     res.json({ ok: true });
   });
-  api.post('/auth/resend', authLimiter, async (req, res) => {
+  api.post('/auth/resend', codeLimiter, async (req, res) => {
     const d = Ident.strict().parse(req.body);
     const id = parseIdentifier(d.identifier, d.country);
     const u = await pendingFor(id);
@@ -191,7 +204,7 @@ export function createApp() {
     if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter });
     res.json({ ok: true });
   });
-  api.post('/auth/login', authLimiter, async (req, res) => {
+  api.post('/auth/login', loginLimiter, loginIdLimiter, async (req, res) => {
     const d = LoginSchema.parse(req.body);
     let accts;
     try { accts = await accountsFor(parseIdentifier(d.login, d.country || 'NG'), { verifiedOnly: false }); }
@@ -203,6 +216,8 @@ export function createApp() {
       if (await matchPassword(pending, d.password)) return res.status(403).json({ error: 'This account isn’t verified yet. Enter the code we sent you, or request a new one.', code: 'PENDING_VERIFICATION' });
       return res.status(401).json({ error: 'Wrong email/phone or password' });
     }
+    const { rows: sus } = await q('SELECT suspended_at FROM users WHERE id = $1', [hit.id]);
+    if (sus[0]?.suspended_at) return res.status(403).json({ error: 'This account has been suspended for breaking the Community Standards.', code: 'SUSPENDED' });
     const reactivated = Boolean(hit.deactivated_at);
     if (reactivated) await q('UPDATE users SET deactivated_at = NULL WHERE id = $1', [hit.id]);
     await createSession(res, hit.id, req.get('user-agent'), req);
@@ -230,9 +245,9 @@ export function createApp() {
     // Same answer whether or not accounts exist (no enumeration). Masked destination only for email/phone typed by the user.
     res.json({ ok: true, message: 'If we found an account, we’ve sent a 6-digit code to the email or phone on file.' });
   };
-  api.post('/auth/forgot', authLimiter, sendIdentCode('reset_password'));
-  api.post('/auth/find', authLimiter, sendIdentCode('find_account'));
-  api.post('/auth/code-accounts', authLimiter, async (req, res) => {
+  api.post('/auth/forgot', codeLimiter, sendIdentCode('reset_password'));
+  api.post('/auth/find', codeLimiter, sendIdentCode('find_account'));
+  api.post('/auth/code-accounts', codeLimiter, async (req, res) => {
     const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('NG'), code: Code, purpose: z.enum(['reset_password', 'find_account']) }).strict().parse(req.body);
     const id = await resolveQuery(d.identifier, d.country);
     const r = id ? await consumeCode(keyOf(id), d.purpose, d.code) : 'expired';
@@ -240,7 +255,7 @@ export function createApp() {
     const ticket = await createTicket(keyOf(id), 'pick_account');
     res.json({ ticket, sent_to: mask(id), login_identifier: id.value, accounts: (await accountsFor(id)).map(pub) });
   });
-  api.post('/auth/reset', authLimiter, async (req, res) => {
+  api.post('/auth/reset', codeLimiter, async (req, res) => {
     const d = z.object({ ticket: z.string().min(10).max(100), user_id: z.number().int().positive(), password }).strict().parse(req.body);
     const t = await readTicket(d.ticket);
     if (!t) return res.status(400).json({ error: 'This reset session expired. Please request a new code.' });
@@ -296,7 +311,7 @@ export function createApp() {
     });
   }
   api.get('/users/:username', requireAuth, async (req, res) => {
-    const { rows } = await q('SELECT * FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL AND email_verified_at IS NOT NULL', [req.params.username]);
+    const { rows } = await q('SELECT * FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL AND suspended_at IS NULL AND email_verified_at IS NOT NULL', [req.params.username]);
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });
     const u = rows[0]; const me = req.user.id;
     const rel = (await q(`SELECT
@@ -516,9 +531,72 @@ export function createApp() {
   });
   registerSocial(api, { requireAuth, requireVerified, id, pagePosts, checkPassword, BCRYPT_COST, config });
 
+  // ---------- reports & moderation ----------
+  const ReportSchema = z.object({ target_type: z.enum(['post', 'user']), post_id: z.number().int().positive().optional(), username: z.string().max(40).optional(), reason: z.string().trim().min(3, 'Tell us briefly what is wrong').max(500) }).strict();
+  api.post('/reports', requireVerified, reportLimiter, async (req, res) => {
+    if (!config.features.reports) return res.status(404).json({ error: 'Not found' });
+    const d = ReportSchema.parse(req.body);
+    let postId = null, userId = null;
+    if (d.target_type === 'post') {
+      const p = d.post_id && await getVisiblePost(req.user.id, d.post_id);
+      if (!p) return res.status(404).json({ error: 'Post not found' });
+      postId = p.id;
+      userId = (await q('SELECT author_id FROM posts WHERE id = $1', [p.id])).rows[0].author_id;
+    } else {
+      const { rows } = await q('SELECT id FROM users WHERE lower(username) = lower($1) AND email_verified_at IS NOT NULL', [String(d.username || '').replace(/^@/, '')]);
+      if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+      userId = rows[0].id;
+    }
+    if (userId === req.user.id) return res.status(400).json({ error: 'You can’t report yourself' });
+    const dup = await q("SELECT 1 FROM reports WHERE reporter_id = $1 AND target_type = $2 AND COALESCE(post_id,0) = COALESCE($3,0) AND target_user_id = $4 AND status = 'open'", [req.user.id, d.target_type, postId, userId]);
+    if (!dup.rowCount) await q('INSERT INTO reports (reporter_id, target_type, post_id, target_user_id, reason) VALUES ($1,$2,$3,$4,$5)', [req.user.id, d.target_type, postId, userId, d.reason]);
+    res.status(201).json({ ok: true, message: 'Thanks. Our moderators will review this.' });
+  });
+  api.get('/admin/reports', requireModerator, async (req, res) => {
+    const status = z.enum(['open', 'actioned', 'dismissed', 'all']).default('open').parse(req.query.status);
+    const { rows } = await q(`SELECT r.id, r.target_type, r.reason, r.status, r.resolution, r.created_at, r.resolved_at, r.post_id,
+        left(p.body, 200) AS post_body, p.hidden_at AS post_hidden_at,
+        json_build_object('id', ru.id, 'username', ru.username) AS reporter,
+        json_build_object('id', tu.id, 'username', tu.username, 'full_name', tu.full_name, 'suspended_at', tu.suspended_at) AS target_user,
+        (SELECT count(*)::int FROM reports r2 WHERE r2.target_user_id = r.target_user_id) AS reports_against_user
+      FROM reports r JOIN users ru ON ru.id = r.reporter_id LEFT JOIN users tu ON tu.id = r.target_user_id LEFT JOIN posts p ON p.id = r.post_id
+      WHERE ($1 = 'all' OR r.status = $1) ORDER BY r.id DESC LIMIT 200`, [status]);
+    res.json({ items: rows });
+  });
+  const closeReports = (where, params, resolution, by) => q(`UPDATE reports SET status = 'actioned', resolution = $${params.length + 1}, handled_by = $${params.length + 2}, resolved_at = now() WHERE status = 'open' AND ${where}`, [...params, resolution, by]);
+  api.post('/admin/reports/:id/dismiss', requireModerator, async (req, res) => {
+    await q("UPDATE reports SET status = 'dismissed', resolution = 'dismissed', handled_by = $2, resolved_at = now() WHERE id = $1", [id(req.params.id), req.user.id]);
+    res.json({ ok: true });
+  });
+  // Hiding/suspending never deletes anything: it sets a timestamp that can be undone.
+  api.post('/admin/posts/:id/hide', requireModerator, async (req, res) => {
+    const pid = id(req.params.id);
+    const r = await q('UPDATE posts SET hidden_at = now(), hidden_by = $2 WHERE id = $1 AND hidden_at IS NULL', [pid, req.user.id]);
+    await closeReports('post_id = $1', [pid], 'post hidden', req.user.id);
+    res.json({ ok: true, changed: r.rowCount });
+  });
+  api.post('/admin/posts/:id/unhide', requireModerator, async (req, res) => {
+    await q('UPDATE posts SET hidden_at = NULL, hidden_by = NULL WHERE id = $1', [id(req.params.id)]);
+    res.json({ ok: true });
+  });
+  api.post('/admin/users/:id/suspend', requireModerator, async (req, res) => {
+    const uid = id(req.params.id);
+    const { reason } = z.object({ reason: z.string().trim().max(300).default('') }).strict().parse(req.body || {});
+    if (uid === req.user.id) return res.status(400).json({ error: 'You cannot suspend yourself' });
+    const { rows } = await q("SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1 AND r.name = 'admin'", [uid]);
+    if (rows.length) return res.status(400).json({ error: 'Remove the admin role before suspending this account' });
+    await q('UPDATE users SET suspended_at = COALESCE(suspended_at, now()), suspended_reason = $2 WHERE id = $1', [uid, reason]);
+    await closeReports('target_user_id = $1', [uid], 'user suspended', req.user.id);
+    res.json({ ok: true });
+  });
+  api.post('/admin/users/:id/unsuspend', requireModerator, async (req, res) => {
+    await q("UPDATE users SET suspended_at = NULL, suspended_reason = '' WHERE id = $1", [id(req.params.id)]);
+    res.json({ ok: true });
+  });
+
   // ---------- admin ----------
   api.get('/admin/users', requireAdmin, async (_req, res) => {
-    const { rows } = await q(`SELECT u.id, u.username, u.full_name, u.email, u.phone, u.created_at, u.email_verified_at IS NOT NULL AS email_verified,
+    const { rows } = await q(`SELECT u.id, u.username, u.full_name, u.email, u.phone, u.created_at, u.email_verified_at IS NOT NULL AS email_verified, u.suspended_at,
       COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
       FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id GROUP BY u.id ORDER BY u.id LIMIT 500`);
     res.json({ items: rows });

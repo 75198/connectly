@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { createApp, pool } from '../server/app.js';
 import { migrate } from '../server/migrate.js';
 import { testOutbox } from '../server/mailer.js';
+import { powFor } from './pow-helper.js';
 
 let app, png;
 const H = { 'X-Connectly-CSRF': '1' };
@@ -12,7 +13,8 @@ const lastCode = (email) => [...testOutbox].reverse().find((m) => m.to === email
 const post = (a, url) => a.post(url).set(H);
 async function register(name, email = `${name}@s.io`, pw = 'Password123!') {
   const a = request.agent(app);
-  let r = await post(a, '/api/auth/register').send({ identifier: email, password: pw, full_name: `${name[0].toUpperCase()}${name.slice(1)} Social`, birth_date: '1990-01-01', accept_terms: true });
+  const pow = await powFor(a);
+  let r = await post(a, '/api/auth/register').send({ identifier: email, password: pw, full_name: `${name[0].toUpperCase()}${name.slice(1)} Social`, birth_date: '1990-01-01', accept_terms: true, pow });
   assert.equal(r.status, 201, JSON.stringify(r.body));
   r = await post(a, '/api/auth/verify').send({ identifier: email, code: lastCode(email) }); assert.equal(r.status, 200);
   r = await a.patch('/api/me').set(H).send({ username: name }); assert.equal(r.status, 200);

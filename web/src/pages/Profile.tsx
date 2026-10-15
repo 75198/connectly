@@ -26,7 +26,7 @@ function FriendButtons({ u, onChange }: { u: User; onChange: (p: Partial<User>) 
     </div>
     {err && <p className="error">{err}</p>}
     {menu && <Sheet title={u.full_name} onClose={() => setMenu(false)}>
-      <div className="list"><button className="danger" onClick={async () => { if (!confirm(`Block ${u.full_name}? You won’t see each other’s profiles or posts, and you’ll be unfriended.`)) return; await api(`/users/${n}/block`, { method: 'PUT' }); nav('/'); }}><Icon name="lock" /> Block {u.full_name.split(' ')[0]}</button></div>
+      <div className="list"><button className="danger" onClick={async () => { if (!confirm(`Block ${u.full_name}? You won’t see each other’s profiles or posts, and you’ll be unfriended.`)) return; await api(`/users/${n}/block`, { method: 'PUT' }); nav('/'); }}><Icon name="lock" /> Block {u.full_name.split(' ')[0]}</button><button className="danger" onClick={async () => { const reason = prompt(`Why are you reporting ${u.full_name}? (fake account, spam, harassment…)`); if (!reason || !reason.trim()) return; try { await api('/reports', { json: { target_type: 'user', username: u.username, reason: reason.trim() } }); alert('Thanks. Our moderators will review this account.'); } catch (e: any) { alert(e.message); } }}><Icon name="flag" /> Report {u.full_name.split(' ')[0]}</button></div>
     </Sheet>}
   </div>;
 }

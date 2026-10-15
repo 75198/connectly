@@ -24,6 +24,11 @@ export function PostCard({ post, onChange, onDelete }: { post: Post; onChange: (
     try { onChange(await api<Post>(`/posts/${post.id}`, { method: 'PATCH', json: { body: draft, visibility: dvis } })); setEditing(false); }
     catch (e: any) { setErr(e.message); }
   }
+  async function report() {
+    const reason = prompt('Why are you reporting this post? (spam, harassment, hate speech, scam…)');
+    if (!reason || !reason.trim()) return;
+    try { await api('/reports', { json: { target_type: 'post', post_id: post.id, reason: reason.trim() } }); alert('Thanks. Our moderators will review this post.'); } catch (e: any) { setErr(e.message); }
+  }
   async function del() {
     if (!confirm('Delete this post? This cannot be undone.')) return;
     try { await api(`/posts/${post.id}`, { method: 'DELETE' }); onDelete(post.id); } catch (e: any) { setErr(e.message); }
@@ -39,6 +44,8 @@ export function PostCard({ post, onChange, onDelete }: { post: Post; onChange: (
         </div>
         {mine && <div className="menuwrap"><button className="btn icon ghost" aria-label="Post options" onClick={() => setMenu(!menu)}><Icon name="more" /></button>
           {menu && <div className="menu" onMouseLeave={() => setMenu(false)}><button onClick={() => { setEditing(true); setMenu(false); }}>Edit post</button><button className="danger" onClick={() => { setMenu(false); del(); }}>Delete post</button></div>}</div>}
+        {!mine && me && !post.author.space && <div className="menuwrap"><button className="btn icon ghost" aria-label="Post options" onClick={() => setMenu(!menu)}><Icon name="more" /></button>
+          {menu && <div className="menu" onMouseLeave={() => setMenu(false)}><button onClick={() => { setMenu(false); report(); }}><Icon name="flag" /> Report post</button></div>}</div>}
       </header>
       {editing ? (
         <form onSubmit={save} className="stack">

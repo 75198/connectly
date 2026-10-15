@@ -1,9 +1,10 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, ageFrom, looksLikePhone, NAME_RE } from '../api';
 import { useSession } from '../session';
 import { IdentifierInput } from '../components/Identifier';
 import { FlowShell, CodeInput } from './Auth';
+import { solvePow, Pow } from '../lib/pow';
 
 
 export function Signup() {
@@ -18,6 +19,9 @@ export function Signup() {
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(''); const [signingIn, setSigningIn] = useState(false);
   const [same, setSame] = useState(false); const [back, setBack] = useState(false);
   const [phoneOk, setPhoneOk] = useState<boolean | null>(null);
+  // Bot check (proof-of-work) starts quietly in the background once the first screen is done.
+  const powRef = useRef<Promise<Pow> | null>(null);
+  const startPow = () => { if (!powRef.current) powRef.current = solvePow().catch((e) => { powRef.current = null; throw e; }); };
   useEffect(() => { api<{ phone_signup: boolean }>('/auth/capabilities').then((c) => setPhoneOk(c.phone_signup)).catch(() => setPhoneOk(false)); }, []);
   const isPhone = looksLikePhone(identifier);
   const phoneBlocked = isPhone && phoneOk === false;
@@ -33,7 +37,7 @@ export function Signup() {
     if (step === 0) return run(async () => {
       if (password.length < 8) throw new Error('Password must be at least 8 characters');
       const r = await api<{ normalized: string }>('/auth/check-identifier', { json: { identifier, country, password } });
-      setSentTo(r.normalized); go(1);
+      setSentTo(r.normalized); startPow(); go(1);
     });
     if (step === 1) { if (!nameValid) return setErr('Use letters, spaces, hyphens or apostrophes only'); return go(2); }
     if (step === 2) {
@@ -44,7 +48,9 @@ export function Signup() {
     }
     if (step === 3) return run(async () => {
       if (!terms) throw new Error('Please agree to the Terms to continue');
-      const r = await api<{ sent_to: string }>('/auth/register', { json: { identifier, country, password, full_name: name, birth_date: dob, accept_terms: true } });
+      startPow();
+      const pow = await powRef.current!; powRef.current = null; // each check works once
+      const r = await api<{ sent_to: string }>('/auth/register', { json: { identifier, country, password, full_name: name, birth_date: dob, accept_terms: true, pow } });
       setSentTo(r.sent_to); go(4);
     });
     if (step === 4) return run(async () => {
@@ -80,7 +86,7 @@ export function Signup() {
       {err && <p className="error" role="alert">{err}</p>}{msg && <p className="success">{msg}</p>}
       {same && <div className="row"><Link className="btn primary grow" to={`/login?u=${encodeURIComponent(identifier)}`}>Log in</Link><Link className="btn ghost grow" to="/find">Find account</Link></div>}
       <button className="btn primary block" disabled={busy || (step === 0 && (phoneBlocked || !identifier || !password)) || (step === 1 && !name) || (step === 2 && !dob) || (step === 3 && !terms) || (step === 4 && code.length !== 6)}>
-        {busy ? 'Please wait…' : step === 3 ? 'Create account' : step === 4 ? 'Verify' : 'Continue'}</button>
+        {busy ? (step === 3 ? 'Checking you’re not a bot…' : 'Please wait…') : step === 3 ? 'Create account' : step === 4 ? 'Verify' : 'Continue'}</button>
       {step > 0 && step < 4 && <button type="button" className="btn ghost block" onClick={() => go(step - 1)}>Back</button>}
       {step === 4 && <button type="button" className="linkish" disabled={busy} onClick={resend}>Resend code</button>}
     </form>
