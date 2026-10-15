@@ -1,3 +1,4 @@
+import { startPricing } from './pricing.js';
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { startPurgeJob } from './postextras.js';
@@ -13,4 +14,4 @@ if (config.features.aiSupport) startAiWarmup(); // keeps the Groq connection war
 import { sweepDisappearing } from './round9.js';
 if (config.features.disappearing) setInterval(() => sweepDisappearing().catch((e) => console.error('disappearing sweep failed', e.message)), 60 * 1000).unref();
 import { startNewsRefresh } from './news.js';
-if (config.features.news) startNewsRefresh(); // RSS headlines cached in memory, refreshed every 20 minutes
+if (config.features.news) startNewsRefresh(); startPricing(); // RSS headlines cached in memory, refreshed every 20 minutes

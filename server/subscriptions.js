@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { q } from './db.js';
 import { config } from './config.js';
+import { regionOf, priceFor } from './pricing.js';
 import { activeProvider, providerSummary } from './payments/index.js';
 
 export const TIERS = ['free', 'pro', 'premium'];
@@ -24,9 +25,13 @@ export function registerSubscriptions(api, { requireAuth, requireAdmin, id }) {
   const on = (_req, res, next) => (config.features.subscriptions ? next() : res.status(404).json({ error: 'Not found' }));
   const checkoutEnabled = () => !!activeProvider();
 
-  api.get('/subscriptions/plans', requireAuth, on, async (_req, res) => {
+  api.get('/subscriptions/plans', requireAuth, on, async (req, res) => {
     const { rows } = await q('SELECT * FROM plans ORDER BY sort');
-    res.json({ items: rows.map(publicPlan), checkout_enabled: checkoutEnabled() });
+    if (!config.features.localCurrency) return res.json({ items: rows.map(publicPlan), checkout_enabled: checkoutEnabled() });
+    const region = await regionOf(req); const { rows: book } = await q("SELECT item, usd_cents FROM price_book WHERE item LIKE 'plan:%'");
+    const items = await Promise.all(rows.map(async (p) => { const b = book.find((x) => x.item === `plan:${p.code}`);
+      return { ...publicPlan(p), local: p.price_minor === 0 && !b?.usd_cents ? null : await priceFor(`plan:${p.code}`, b?.usd_cents != null ? b : { minor: p.price_minor, currency: p.currency }, region) }; }));
+    res.json({ items, region, checkout_enabled: checkoutEnabled() });
   });
   api.get('/me/subscription', requireAuth, on, async (req, res) => {
     const { rows } = await q("SELECT tier, status, current_period_end, updated_at FROM user_subscriptions WHERE user_id = $1", [req.user.id]);

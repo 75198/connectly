@@ -4,7 +4,7 @@ import { api, useFeatures } from '../api';
 import { Avatar } from '../components/ui';
 import { useSession } from '../session';
 import { AdminLive } from '../components/LiveRow';
-import { AdminPlans } from './Plans';
+import { AdminPlans, AdminPrices } from './Plans';
 import { getFeatures } from '../api';
 
 type AU = { id: number; username: string; full_name: string; email: string; roles: string[]; created_at: string };
@@ -21,7 +21,7 @@ export function Admin() {
   useEffect(() => { load(); }, []);
   if (!me?.roles?.includes('admin')) return <div className="card empty">Admins only.</div>;
   const setRole = async (u: AU, role: string, on: boolean) => { try { await api(on ? `/admin/users/${u.id}/roles` : `/admin/users/${u.id}/roles/${role}`, on ? { json: { role } } : { method: 'DELETE' }); load(); } catch (e: any) { setErr(e.message); } };
-  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminExtras users={users} />
+  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminPrices /><AdminExtras users={users} />
     <h1 className="pagetitle">Admin</h1>
     {err && <p className="error card">{err}</p>}
     {status && <section className="card"><h3>Email delivery</h3><p className={status.smtp_configured ? 'success' : 'notice'}>{status.note}</p></section>}

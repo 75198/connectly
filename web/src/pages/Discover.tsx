@@ -1,4 +1,5 @@
 // Round 7/8 pages: hashtag, sound, challenges, events, memories, streaks, wallet, creator insights, scheduled posts.
+import { showPrice, type Price } from '../lib/region';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, credit, Post, toast, Track, useFeatures } from '../api';
@@ -110,10 +111,12 @@ export function StreakPage() {
 }
 
 export function Wallet() {
-  const [w, setW] = useState<any>(null); useEffect(() => { api('/coins').then(setW).catch(() => {}); }, []);
+  const [w, setW] = useState<any>(null); const [packs, setPacks] = useState<{ item: string; coins: number; price: Price }[]>([]);
+  useEffect(() => { api('/coins').then(setW).catch(() => {}); api<{ packs: any[] }>('/coins/packs').then((r) => setPacks(r.packs)).catch(() => {}); }, []);
   if (!w) return <Spinner />;
   return <div className="stack"><Back title="Coins" /><div className="card wallethero"><span className="coin">🪙</span><b>{w.balance}</b><small className="meta">Send gifts to creators when they go live.</small>
     <button className="btn primary" onClick={() => api('/coins/purchase', { method: 'POST' }).catch((e) => toast(e.message))}>Buy coins · Coming soon</button></div>
+    {packs.length > 0 && <><h3>Coin packs</h3><div className="giftgrid">{packs.map((p) => <div key={p.item} className="gifttile"><span>🪙</span><b>{p.coins.toLocaleString()}</b><small>{showPrice(p.price)}</small></div>)}</div></>}
     <h3>Gifts</h3><div className="giftgrid">{w.gifts.map((g: any) => <div key={g.key} className="gifttile"><span>{g.emoji}</span><b>{g.name}</b><small>🪙 {g.coins}</small></div>)}</div>
     {w.history.length > 0 && <><h3>History</h3><div className="card list">{w.history.map((h: any, i: number) => <div key={i} className="row between"><span>{({ admin_grant: 'Coins added', gift_sent: 'Gift sent', gift_received: 'Gift received' } as any)[h.reason] || h.reason}</span><b className={h.delta > 0 ? 'pos' : ''}>{h.delta > 0 ? '+' : ''}{h.delta}</b></div>)}</div></>}</div>;
 }

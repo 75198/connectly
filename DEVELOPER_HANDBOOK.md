@@ -64,6 +64,10 @@ Flags live in `server/config.js` → `config.features` and are read from env var
 | `FEATURE_LIVE` | 0 | Go Live video (`/api/live*`, `/live/new`, `/live/:id`, Create menu chip, Home live row, story rings) |
 | `FEATURE_SUBSCRIPTIONS` | 0 | Free / Connectly Pro / Connectly Premium tiers, Settings › Subscription and Upgrade, admin plan + tier controls |
 | `FEATURE_WELCOME_HERO` | 1 | Animated video landing screen at `/` for logged-out visitors (off: `/` goes straight to Log in) |
+| Round 7 flags (default 0) | 0 | `FEATURE_MESSAGES` (DMs + message requests), `FEATURE_CALLS` (WebRTC voice/video), `FEATURE_VERIFIED`, `FEATURE_HASHTAGS`, `FEATURE_FOR_YOU`, `FEATURE_PUSH` (needs `VAPID_*` in the server `.env` only), `FEATURE_I18N`, `FEATURE_TRANSLATE`, `FEATURE_CREATOR_TOOLS`, `FEATURE_EVENTS`, `FEATURE_POLLS`, `FEATURE_CLOSE_FRIENDS`, `FEATURE_HIDE_LIKES`, `FEATURE_TWO_STEP`, `FEATURE_LOGIN_ALERTS` |
+| Round 8 flags (default 0) | 0 | `FEATURE_MUSIC`, `FEATURE_AR_EFFECTS`, `FEATURE_REMIX` (duets), `FEATURE_CHALLENGES`, `FEATURE_GIFTS` (coins, no real payments), `FEATURE_GAMES`, `FEATURE_WATCH_TOGETHER`, `FEATURE_MEMORIES`, `FEATURE_STICKERS`, `FEATURE_STREAKS` |
+| Round 9 privacy flags (default 0) | 0 | `FEATURE_PRIVATE_ACCOUNTS`, `FEATURE_WHO_CAN`, `FEATURE_HIDE_PRESENCE`, `FEATURE_HIDE_LISTS`, `FEATURE_RESTRICT_MUTE`, `FEATURE_HIDDEN_WORDS`, `FEATURE_DISAPPEARING`, `FEATURE_DATA_EXPORT`, `FEATURE_DISCOVERABILITY`, `FEATURE_TEEN_SAFETY`, `FEATURE_ADD_YOURS`, `FEATURE_COLLECTIONS` |
+| AI, content, money (default 0) | 0 | `FEATURE_AI_VISION`, `FEATURE_AI_VOICE`, `FEATURE_NEWS`, `FEATURE_BACKFILL`, `FEATURE_LOCAL_CURRENCY` |
 Flags the client needs are exposed read-only in `GET /api/auth/capabilities` → `features`.
 Other tunables: `POW_BITS` (default 17, about 1-3 s in a phone browser; raise it if bots get through).
 
@@ -162,3 +166,31 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - Screens: Settings › Subscription (`/settings/subscription`), Upgrade (`/settings/plans`), and a profile PRO/PREMIUM badge. Admin: a plan editor (name, price, currency, AI per hour) and a tier dropdown per user (`PUT /admin/users/:id/subscription`).
 - Payments are pluggable (`server/payments/index.js`). The planned providers are **App Store** and **Google Play** in-app purchases for the store apps, plus an optional web card processor. Nothing charges yet: checkout returns 503 "Upgrades are coming soon." until a provider's credentials are set **and** `PAYMENTS_LIVE=1`.
 - Perks hooks: `perks.reel_seconds` and `story_extras` are stored for the upcoming longer-reels and story features. Today only the badge and the AI allowance are enforced.
+
+## 18. Rounds 7 and 8 (migrations 015, 016)
+- Round 7: DMs with message requests (people you don't follow land in Requests), WebRTC calls (free public STUN only, so some strict networks can't connect), verified badge with an admin queue, hashtags, the For You feed, web push (VAPID keys live only in the server `.env`), core-string translations (not every screen yet), creator insights and scheduling, events, polls, close friends, two-step login and new-device alerts, and sounds.
+- Round 8: music on stories and reels (bundled royalty-free tracks), AR face effects (MediaPipe, self-hosted in `web/public/mediapipe`), duets and remix, challenges, live gifts using coins (coins can only be granted by admins today; buying them says "Coming soon"), chat games, watch together, memories ("On this day"), stickers, and streaks with badges.
+- 015 and 016 use ON DELETE CASCADE / SET NULL on every user reference, so deleting an account never fails.
+
+## 19. Round 9 privacy (migration 017)
+- Private accounts (follows become requests; going public approves pending ones), who can comment/tag/mention, hide online status (reciprocal), hide follower lists, restrict and mute, hidden words (a default list plus your own), disappearing messages, close-friends-only posts, Add Yours stickers, collections, a ZIP data export, email/phone discoverability, and teen safety (new under-18 accounts start private; adults they don't follow can't message them).
+- **Defaults never change what existing users already show.** Every new column defaults to the old behaviour; only new teen signups start private.
+- Screenshots can't be reliably detected on the web, and the app says so plainly.
+
+## 20. Connectly AI: vision, voice and speed
+- Photos: sent to a Groq vision model chosen from Groq's live model list (`GROQ_VISION_MODEL` to pin one). The Llama 4 vision models aren't on Groq's list right now; if no vision model is available the reply says so instead of failing. A 360px thumbnail is kept in the chat history.
+- Voice: the mic records and auto-stops when you go quiet, then transcribes with Groq Whisper (`whisper-large-v3-turbo`) through our server; the clip is kept in history. Speak uses the browser's own speech in the user's language. Hands-free mode chains the two.
+- Speed: keep-alive connections, a warm ping every 45s, a short prompt, and history capped at 8 messages. `ttft_ms` is in the final stream event; set `AI_LOG_TTFT=1` to log it. `GROQ_CHAT_MODEL` picks the chat model.
+
+## 21. News, starter content and freshness
+- News: public RSS only (BBC incl. language services, BBC Pidgin/Africa, Al Jazeera, Guardian, DW, NPR, Premium Times). Reuters and AP offer no free RSS. We show headline, source, image (through our resizing proxy, so publishers never see readers) and a link out; never full articles. Cached on the server and refreshed every 15 minutes; anything older than 48 hours is hidden. Personalised only from in-app signals (interests, searches, liked/followed hashtags, language, profile location, detected country). No cross-app tracking.
+- Starter content (`FEATURE_BACKFILL`): so Home and Reels are never empty, they mix in news, public-domain/CC films from the Internet Archive and bundled CC BY Blender clips (with licence and source shown), suggested public accounts, and popular public posts. Never Friends-only, Only-me or private-account content.
+- Freshness: content loads fresh when the app opens or is reopened after 10+ minutes (Home and Reels). While open, nothing reorders by itself; a "New posts" pill only notifies, and new items come in on tap or pull-to-refresh. Infinite scroll at the bottom. Starter films and clips you've seen on a device go to the back of the line.
+
+## 22. Local currency (migration 018, `FEATURE_LOCAL_CURRENCY`)
+- Country detection is private: manual choice > our own offline IP-to-country table (DB-IP Lite, CC BY 4.0, downloaded monthly into `server/data/`, which is git-ignored) > device time zone > device language. **User IPs are never sent to any third party.**
+- Settings › Country and currency lets people pick a country and/or currency by hand.
+- Admin › Local prices: a USD base per item (`plan:pro`, `plan:premium`, `coins:<n>`) plus per-country overrides in that country's currency. A plan without a USD base keeps its existing price in its own currency (so existing Nigerian prices are unchanged) and is converted for everyone else.
+- Rates: open.er-api.com (free, no key), cached daily in `server/data/rates.json`. Converted prices are rounded to friendly points (4.99, 1,500, 15,000) and marked "≈"; formatting uses `Intl.NumberFormat`.
+- Marketplace keeps the seller's price and currency and adds an approximate conversion.
+- **Store apps:** in the App Store and Google Play builds, Apple and Google set and charge local prices; these server prices are for the web only.

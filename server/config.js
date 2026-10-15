@@ -63,6 +63,7 @@ export const config = {
     hiddenWords: (env.FEATURE_HIDDEN_WORDS ?? '0') === '1',
     disappearing: (env.FEATURE_DISAPPEARING ?? '0') === '1',
     dataExport: (env.FEATURE_DATA_EXPORT ?? '0') === '1',
+    localCurrency: (env.FEATURE_LOCAL_CURRENCY ?? '0') === '1',
     discoverability: (env.FEATURE_DISCOVERABILITY ?? '0') === '1',
     teenSafety: (env.FEATURE_TEEN_SAFETY ?? '0') === '1',
   },

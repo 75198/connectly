@@ -8,11 +8,12 @@ import { CodeInput } from './Auth';
 import { CloseFriendsSection, ExtraLinks, LanguageSection, MessagingSection, PushSection, SecuritySection, SoundsSection, VerifySection } from './SettingsExtra';
 
 import { TextSize } from './TextSize';
+import { RegionSection } from './Region';
 import { FollowRequests, PeopleList, PrivacyCenter } from './PrivacyCenter';
 const SECTIONS: [string, string, Parameters<typeof Icon>[0]['name']][] = [
   ['account', 'Edit account', 'user'], ['email', 'Change email', 'chat'], ['phone', 'Change phone number', 'chat'], ['password', 'Change password', 'lock'],
   ['blocked', 'Blocked accounts', 'shield'], ['activity', 'Your activity log', 'flag'], ['sessions', 'Where you’re logged in', 'globe'], ['logins', 'Login history', 'globe'],
-  ['privacy', 'Post and profile privacy', 'lock'], ['notifications', 'Notifications', 'bell'], ['text-size', 'Text size', 'sliders'], ['deactivate', 'Deactivate or delete account', 'x'],
+  ['privacy', 'Post and profile privacy', 'lock'], ['notifications', 'Notifications', 'bell'], ['text-size', 'Text size', 'sliders'], ['region', 'Country and currency', 'globe'], ['deactivate', 'Deactivate or delete account', 'x'],
 ];
 const Back = ({ title }: { title: string }) => <div className="row"><Link to="/settings" className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">{title}</h1></div>;
 
@@ -40,7 +41,7 @@ export function Settings() {
 
 export function SettingsSection() {
   const { section = '' } = useParams();
-  const C = ({ 'privacy-center': PrivacyCenter, 'follow-requests': FollowRequests, restricted: () => <PeopleList kind="restricted" />, muted: () => <PeopleList kind="muted" />, 'text-size': TextSize, account: Account, email: () => <ChangeId kind="email" />, phone: () => <ChangeId kind="phone" />, password: Password, blocked: Blocked, activity: Activity, sessions: Sessions, logins: Logins, privacy: Privacy, notifications: Notifications, deactivate: Deactivate, language: LanguageSection, sounds: SoundsSection, security: SecuritySection, verification: VerifySection, 'close-friends': CloseFriendsSection, messaging: MessagingSection } as Record<string, () => JSX.Element>)[section];
+  const C = ({ 'privacy-center': PrivacyCenter, 'follow-requests': FollowRequests, restricted: () => <PeopleList kind="restricted" />, muted: () => <PeopleList kind="muted" />, 'text-size': TextSize, region: RegionSection, account: Account, email: () => <ChangeId kind="email" />, phone: () => <ChangeId kind="phone" />, password: Password, blocked: Blocked, activity: Activity, sessions: Sessions, logins: Logins, privacy: Privacy, notifications: Notifications, deactivate: Deactivate, language: LanguageSection, sounds: SoundsSection, security: SecuritySection, verification: VerifySection, 'close-friends': CloseFriendsSection, messaging: MessagingSection } as Record<string, () => JSX.Element>)[section];
   if (!C) return <div className="card empty">Not found. <Link to="/settings">Back to settings</Link></div>;
   return <C />;
 }

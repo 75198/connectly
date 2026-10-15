@@ -53,7 +53,7 @@ export function deviceName(ua: string | null) {
 export type Features = { reels: boolean; welcome_hero: boolean; ai_support?: boolean; live?: boolean; subscriptions?: boolean;
   messages?: boolean; calls?: boolean; verified?: boolean; hashtags?: boolean; for_you?: boolean; push?: boolean; i18n?: boolean; translate?: boolean; creator_tools?: boolean; events?: boolean; polls?: boolean; close_friends?: boolean; hide_likes?: boolean; two_step?: boolean;
   music?: boolean; ar_effects?: boolean; remix?: boolean; challenges?: boolean; gifts?: boolean; games?: boolean; watch_together?: boolean; memories?: boolean; stickers?: boolean; streaks?: boolean;
-  news?: boolean; backfill?: boolean; add_yours?: boolean; collections?: boolean; private_accounts?: boolean; who_can?: boolean; hide_presence?: boolean; hide_lists?: boolean; restrict_mute?: boolean; hidden_words?: boolean; disappearing?: boolean; data_export?: boolean; discoverability?: boolean; teen_safety?: boolean };
+  news?: boolean; backfill?: boolean; local_currency?: boolean; add_yours?: boolean; collections?: boolean; private_accounts?: boolean; who_can?: boolean; hide_presence?: boolean; hide_lists?: boolean; restrict_mute?: boolean; hidden_words?: boolean; disappearing?: boolean; data_export?: boolean; discoverability?: boolean; teen_safety?: boolean };
 let featuresP: Promise<Features> | null = null;
 export function getFeatures(): Promise<Features> {
   if (!featuresP) featuresP = api<{ features?: Features }>('/auth/capabilities').then((c) => c.features || { reels: false, welcome_hero: false }).catch(() => { featuresP = null; return { reels: false, welcome_hero: false }; });

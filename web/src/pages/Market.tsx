@@ -1,3 +1,4 @@
+import { approx, useRegion } from '../lib/region';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, money, timeAgo } from '../api';
@@ -11,6 +12,7 @@ let metaCache: Meta | null = null;
 const useMeta = () => { const [m, setM] = useState<Meta | null>(metaCache); useEffect(() => { if (!m) api<Meta>('/listings/meta').then((x) => { metaCache = x; setM(x); }); }, [m]); return m; };
 
 export function Market() {
+  const region = useRegion();
   const [sp, setSp] = useSearchParams(); const meta = useMeta();
   const mine = sp.get('mine') === '1';
   const [q, setQ] = useState(sp.get('q') || ''); const [showFilters, setShowFilters] = useState(false);
@@ -44,7 +46,7 @@ export function Market() {
     {err && <p className="error card">{err}</p>}
     {!items ? <div className="mgrid">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="mcard skel"><span className="sk block sq" /><span className="sk line w60" /><span className="sk line w40" /></div>)}</div> : items.length === 0 ? <p className="card empty">{mine ? 'You haven’t listed anything yet.' : 'No listings match.'}</p> : <div className="mgrid">
       {items.map((l) => <Link key={l.id} to={`/market/${l.id}`} className="mcard"><div className="mimg">{l.photos[0] && <img src={l.photos[0]} alt="" loading="lazy" />}{l.status === 'sold' && <span className="soldtag">Sold</span>}</div>
-        <b>{money(l.price, l.currency)}</b><span className="mtitle">{l.title}</span><small className="meta">{l.location || l.category}</small></Link>)}</div>}
+        <b>{money(l.price, l.currency)}</b>{approx(l.price, l.currency, region) && <small className="meta approx">{approx(l.price, l.currency, region)}</small>}<span className="mtitle">{l.title}</span><small className="meta">{l.location || l.category}</small></Link>)}</div>}
     {cursor && <button className="btn ghost block" disabled={loading} onClick={() => load(false)}>{loading ? 'Loading…' : 'Show more'}</button>}
   </div>;
 }
@@ -77,6 +79,7 @@ export function NewListing() {
 }
 
 export function ListingView() {
+  const region = useRegion();
   const { id = '' } = useParams(); const nav = useNavigate();
   const [l, setL] = useState<Listing | null>(null); const [err, setErr] = useState(''); const [i, setI] = useState(0);
   useEffect(() => { api<Listing>(`/listings/${id}`).then(setL).catch((e) => setErr(e.message)); }, [id]);
@@ -88,7 +91,7 @@ export function ListingView() {
       <div className="lphoto">{l.photos[i] && <img src={l.photos[i]} alt="" />}{l.status === 'sold' && <span className="soldtag">Sold</span>}</div>
       {l.photos.length > 1 && <div className="thumbs">{l.photos.map((p, j) => <button key={p} className={`thumb ${j === i ? 'sel' : ''}`} onClick={() => setI(j)} aria-label={`Photo ${j + 1}`}><img src={p} alt="" /></button>)}</div>}
       <div className="stack pad">
-        <h1>{l.title}</h1><b className="price">{money(l.price, l.currency)}</b>
+        <h1>{l.title}</h1><b className="price">{money(l.price, l.currency)}</b>{approx(l.price, l.currency, region) && <small className="meta approx">{approx(l.price, l.currency, region)} in your currency</small>}
         <p className="meta">{l.category}{l.location ? ` · ${l.location}` : ''} · listed {timeAgo(l.created_at)}</p>
         {l.description && <p className="body">{l.description}</p>}
         <Link to={`/u/${l.seller.username}`} className="person card"><Avatar user={l.seller} size={44} /><span className="grow"><b>{l.seller.full_name}</b><small className="meta">Seller · view profile to contact</small></span><Icon name="chev" /></Link>

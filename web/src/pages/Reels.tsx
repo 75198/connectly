@@ -35,6 +35,9 @@ export function Reels() {
       await load(null);
     })();
   }, [id, load]);
+  // Reopened after 10+ minutes away: start over with fresh reels (never reorders while you're watching).
+  useEffect(() => { let hiddenAt = 0; const v = () => { if (document.hidden) { hiddenAt = Date.now(); return; } if (hiddenAt && Date.now() - hiddenAt > 10 * 60e3 && !id) { setItems([]); setCursor(null); setDone(false); setActive(0); box.current?.scrollTo({ top: 0 }); load(null); if (ffr?.backfill) api<{ clips: Clip[] }>('/backfill').then((r) => setClips(unseenFirst(r.clips))).catch(() => {}); } hiddenAt = 0; };
+    document.addEventListener('visibilitychange', v); return () => document.removeEventListener('visibilitychange', v); }, [id, load, ffr?.backfill]);
   useEffect(() => { if (active >= items.length - 2 && !done && !loading && cursor) load(cursor); }, [active, items.length, done, loading, cursor, load]);
   useEffect(() => {
     const el = box.current; if (!el) return;

@@ -1,6 +1,7 @@
 // News (flag FEATURE_NEWS): headlines from free public RSS feeds. We keep only headline, a short summary line,
 // source, image and a link out to the publisher; full articles are never copied. Feeds are cached server-side and
 // refreshed every 15 minutes. Personalisation uses only in-app signals (interests, searches, likes, follows in Connectly).
+import { regionOf } from './pricing.js';
 import sharp from 'sharp';
 import { q } from './db.js';
 import { config } from './config.js';
@@ -80,8 +81,8 @@ async function signals(uid) {
   return u || {};
 }
 const region = (s) => (/nigeria|lagos|abuja|ibadan|kano|port harcourt|enugu|\bng\b/i.test(s.location || '') || ['yo', 'ha', 'ig'].includes(s.locale) ? 'NG' : /ghana|accra/i.test(s.location || '') ? 'GH' : /kenya|nairobi/i.test(s.location || '') ? 'KE' : /south africa|johannesburg|cape town/i.test(s.location || '') ? 'ZA' : null);
-export async function newsFor(uid, { limit = 12, topic } = {}) {
-  const s = await signals(uid); const reg = region(s);
+export async function newsFor(uid, { limit = 12, topic, country } = {}) {
+  const s = await signals(uid); const reg = region(s) || (['NG', 'GH', 'KE', 'ZA'].includes(country) ? country : null); // country: light hint from private detection
   const keys = [...GLOBAL, ...Object.keys(FEEDS).filter((k) => (FEEDS[k].lang && FEEDS[k].lang === s.locale) || (reg && FEEDS[k].region?.includes(reg)))];
   const all = (await Promise.all(keys.map(loadFeed))).flat();
   const words = [...(Array.isArray(s.interests) ? s.interests : []), ...(s.searches || []), ...(s.liked_tags || []), ...(s.follow_tags || [])].map((w) => String(w).toLowerCase()).filter((w) => w.length > 2).slice(0, 80);
@@ -107,7 +108,7 @@ export function registerNews(api, { requireAuth }) {
   const on = (_q, res, next) => (config.features.news ? next() : res.status(404).json({ error: 'Not found' }));
   api.get('/news', requireAuth, on, async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 30);
-    res.set('Cache-Control', 'private, max-age=300').json({ items: await newsFor(req.user.id, { limit, topic: typeof req.query.topic === 'string' ? req.query.topic : undefined }) });
+    res.set('Cache-Control', 'private, max-age=300').json({ items: await newsFor(req.user.id, { limit, country: config.features.localCurrency ? (await regionOf(req)).country : undefined, topic: typeof req.query.topic === 'string' ? req.query.topic : undefined }) });
   });
   api.get('/news/img', on, async (req, res) => {
     const u = String(req.query.u || ''); if (!ALLOWED_IMG.test(u)) return res.status(404).end();

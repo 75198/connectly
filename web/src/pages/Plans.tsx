@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, money, toast } from '../api';
 import { Icon } from '../components/ui';
+import { showPrice, type Price } from '../lib/region';
 
-type Plan = { code: 'free' | 'pro' | 'premium'; name: string; price_minor: number; currency: string; billing_interval: string; perks: { badge?: string | false; reel_seconds?: number; story_extras?: boolean } };
+type Plan = { code: 'free' | 'pro' | 'premium'; name: string; price_minor: number; currency: string; billing_interval: string; perks: { badge?: string | false; reel_seconds?: number; story_extras?: boolean }; local?: Price | null };
 const BENEFITS: Record<Plan['code'], string[]> = {
   free: ['Connectly AI for everyday questions', 'Posts, reels, stories and Go Live', 'All privacy and safety tools'],
   pro: ['More Connectly AI, for longer chats and more writing help', 'Pro badge on your profile', 'Longer reels', 'Extra story features'],
@@ -28,7 +29,7 @@ export function PlansPage() {
     {err && <p className="error card">{err}</p>}
     {plans?.map((p) => <section key={p.code} className={`card plancard ${p.code}${mine === p.code ? ' current' : ''}`}>{p.code === 'pro' && <span className="planribbon">MOST POPULAR</span>}
       <div className="row between"><h3>{p.name} <TierBadge tier={p.code} /></h3>{mine === p.code && <span className="chip on">Your plan</span>}</div>
-      <p className="planprice">{p.price_minor === 0 ? 'Free' : <>{money(p.price_minor / 100, p.currency)} <small>/ {p.billing_interval}</small></>}</p>
+      <p className="planprice">{p.price_minor === 0 && !p.local ? 'Free' : <>{p.local ? showPrice(p.local) : money(p.price_minor / 100, p.currency)} <small>/ {p.billing_interval}</small></>}</p>
       <ul className="planperks">{BENEFITS[p.code].map((b) => <li key={b}>✓ {b}</li>)}</ul>
       {p.code !== 'free' && mine !== p.code && (checkout ? <button className="btn primary block" onClick={() => upgrade(p.code)}>Upgrade to {p.name}</button>
         : <button className="btn block" disabled>Coming soon</button>)}
@@ -74,5 +75,27 @@ export function AdminPlans() {
       <label>Currency <input name="currency" defaultValue={p.currency} maxLength={3} size={4} /></label>
       <label>AI / hour <input name="ai" type="number" min="0" defaultValue={p.ai_hourly} /></label>
       <button className="btn ghost">Save</button></form>)}
+  </section>;
+}
+
+// Local currency: USD base price per item + per-country overrides (minor units of that currency).
+export function AdminPrices() {
+  const [d, setD] = useState<{ book: { item: string; usd_cents: number | null }[]; plans: { code: string; price_minor: number; currency: string }[]; overrides: { item: string; country: string; currency: string; amount_minor: number }[] } | null>(null);
+  const load = () => api('/admin/prices').then(setD).catch(() => setD(null)); useEffect(() => { load(); }, []);
+  if (!d) return null;
+  const items = [...new Set(['plan:pro', 'plan:premium', ...d.book.map((b) => b.item)])];
+  const base = async (item: string, v: string) => { try { await api(`/admin/prices/${item}`, { method: 'PUT', json: { usd_cents: v === '' ? null : Math.round(Number(v) * 100) } }); toast('Saved'); load(); } catch (e: any) { toast(e.message, 'err'); } };
+  const add = async (el: HTMLFormElement) => { const f = new FormData(el); try { await api(`/admin/prices/${f.get('item')}/${String(f.get('country')).toUpperCase()}`, { method: 'PUT', json: { currency: String(f.get('currency')).toUpperCase(), amount_minor: Math.round(Number(f.get('amount')) * 100) } }); toast('Override saved'); el.reset(); load(); } catch (e: any) { toast(e.message, 'err'); } };
+  const del = (o: { item: string; country: string }) => api(`/admin/prices/${o.item}/${o.country}`, { method: 'DELETE' }).then(load);
+  return <section className="card stack"><h3>Local prices</h3><p className="meta">Set a USD base price; everyone else sees it converted at the daily rate and rounded to a friendly price. A plan with no USD base keeps its own price above and is converted from that. Overrides fix the exact price in one country. In the App Store and Google Play apps, Apple and Google set local prices.</p>
+    {items.map((it) => { const b = d.book.find((x) => x.item === it); return <form key={it} className="row wrap adminplan" onSubmit={(e) => { e.preventDefault(); base(it, String(new FormData(e.currentTarget).get('usd'))); }}>
+      <b className="planc">{it}</b><label>USD base <input name="usd" type="number" step="0.01" min="0" defaultValue={b?.usd_cents != null ? b.usd_cents / 100 : ''} /></label><button className="btn ghost">Save</button></form>; })}
+    <h4>Country overrides</h4>
+    {d.overrides.map((o) => <div key={o.item + o.country} className="row between"><span>{o.item} · {o.country}</span><span>{money(o.amount_minor / 100, o.currency)} <button className="btn ghost" onClick={() => del(o)}>Remove</button></span></div>)}
+    <form className="row wrap adminplan" onSubmit={(e) => { e.preventDefault(); add(e.currentTarget); }}>
+      <label>Item <select name="item">{items.map((i) => <option key={i}>{i}</option>)}</select></label>
+      <label>Country <input name="country" required maxLength={2} size={3} placeholder="NG" /></label>
+      <label>Currency <input name="currency" required maxLength={3} size={4} placeholder="NGN" /></label>
+      <label>Amount <input name="amount" required type="number" step="0.01" min="0" /></label><button className="btn ghost">Add</button></form>
   </section>;
 }

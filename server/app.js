@@ -28,6 +28,7 @@ import { registerMessages } from './messages.js';
 import { registerRound7, saveTags, twoStepMethods, startTwoStep, loginAlert } from './round7.js';
 import { registerRound8, recordActivity } from './round8.js';
 import { registerNews, recordSearch } from './news.js';
+import { registerPricing } from './pricing.js';
 import { registerBackfill } from './backfill.js';
 import { registerRound9, notifyMentions, allowedBy, isRestricted } from './round9.js';
 import { hiddenWordsOf, matchesHidden } from './messages.js';
@@ -131,7 +132,7 @@ function liveConnectSrc() {
 }
 export function round78Features() {
   const f = config.features; const out = {};
-  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety'])
+  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency'])
     out[k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] = !!f[k];
   return out;
 }
@@ -642,6 +643,7 @@ export function createApp() {
   registerRound8(api, { requireAuth, requireVerified, requireAdmin, id, pagePosts, getVisiblePost });
   registerRound9(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost });
   registerNews(api, { requireAuth });
+  registerPricing(api, { requireAuth, requireAdmin });
   registerBackfill(api, { requireAuth });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
