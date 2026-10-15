@@ -608,3 +608,8 @@ button,a,.chip,.btn{transition:transform .12s ease,background-color .15s ease,co
 .plancard .btn.primary{border-radius:999px;background:linear-gradient(135deg,#0F766E,#0EA5E9)}.plancard.premium .btn.primary{background:linear-gradient(135deg,#8B5CF6,#EC4899)}
 .plancard .btn[disabled]{border-radius:999px;background:var(--hover2);color:var(--muted)}
 .planperks li{display:flex;gap:8px}.tierbadge{box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.plancard.pro::before,.plancard.premium::before{display:none}
+.plancard.pro{border:2px solid transparent;background:linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(135deg,#14B8A6,#0EA5E9) border-box}
+.plancard.premium{border:2px solid transparent;background:linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(135deg,#8B5CF6,#EC4899,#F59E0B) border-box}
+[data-theme=dark] .plancard.pro{background:linear-gradient(160deg,#0b1b1f,#0d0d10) padding-box,linear-gradient(135deg,#14B8A6,#0EA5E9) border-box}
+[data-theme=dark] .plancard.premium{background:linear-gradient(160deg,#1a1225,#0d0d10) padding-box,linear-gradient(135deg,#8B5CF6,#EC4899,#F59E0B) border-box}
