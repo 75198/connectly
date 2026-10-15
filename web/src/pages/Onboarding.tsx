@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon } from '../components/ui';
 import { FlowShell } from './Auth';
+import { WELCOME_KEY } from './Welcome';
 
 const STEPS = ['Add a profile photo', 'Stay in the loop', 'Where are you?', 'Find people you know'];
 type Match = { id: number; username: string; full_name: string; avatar_path: string | null };
@@ -21,7 +22,7 @@ export function Onboarding() {
   const contactsSupported = typeof navigator !== 'undefined' && 'contacts' in navigator && 'select' in ((navigator as any).contacts || {});
   const [back, setBack] = useState(false);
   const go = (n: number) => { setBack(n < step); setErr(''); setNote(''); setStep(n); };
-  const finish = async () => { setBusy(true); try { await api('/me/onboarding-complete', { method: 'POST' }); await refresh(); } catch (e: any) { setErr(e.message); setBusy(false); } };
+  const finish = async () => { setBusy(true); try { await api('/me/onboarding-complete', { method: 'POST' }); sessionStorage.setItem(WELCOME_KEY, '1'); await refresh(); } catch (e: any) { setErr(e.message); setBusy(false); } };
   const next = () => (step === STEPS.length - 1 ? finish() : go(step + 1));
   const run = async (fn: () => Promise<void>) => { setErr(''); setBusy(true); try { await fn(); } catch (e: any) { setErr(e.message || 'Something went wrong'); } finally { setBusy(false); } };
 

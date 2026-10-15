@@ -4,7 +4,8 @@ export type User = { hometown?: string; interests?: string[]; relationship_statu
   acting_as?: { id: number; slug: string; name: string; photo_path: string | null } | null; unread_notifications?: number; id: number; username: string; full_name: string; bio: string; location: string; avatar_path: string | null; cover_path: string | null; created_at?: string; email?: string | null; phone?: string | null; email_verified?: boolean; onboarded?: boolean; roles?: string[]; post_count?: number; is_me?: boolean };
 export type Author = { id: number; username: string; full_name: string; avatar_path: string | null; space?: boolean; kind?: string };
 export const authorHref = (a: Author) => (a.space ? `/s/${a.username}` : `/u/${a.username}`);
-export type Post = { id: number; body: string; image_path: string | null; visibility: 'public' | 'friends' | 'private'; created_at: string; updated_at: string; author: Author; is_mine: boolean; space: { slug: string; name: string; kind: string } | null; like_count: number; comment_count: number; liked_by_me: boolean };
+export type Post = { id: number; body: string; image_path: string | null; visibility: 'public' | 'friends' | 'private'; created_at: string; updated_at: string; author: Author; is_mine: boolean; space: { slug: string; name: string; kind: string } | null; like_count: number; comment_count: number; liked_by_me: boolean;
+  kind?: 'post' | 'reel'; video_path?: string | null; poster_path?: string | null; video_seconds?: number | null; view_count?: number };
 export type Comment = { id: number; post_id: number; parent_id: number | null; body: string; created_at: string; author: Author; is_mine?: boolean };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
@@ -41,4 +42,12 @@ export function deviceName(ua: string | null) {
   const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'Device';
   const br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /FxiOS|Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
   return `${br} on ${os}`;
+}
+
+// Public feature flags (server: config.features). Cached for the page lifetime.
+export type Features = { reels: boolean; welcome_hero: boolean };
+let featuresP: Promise<Features> | null = null;
+export function getFeatures(): Promise<Features> {
+  if (!featuresP) featuresP = api<{ features?: Features }>('/auth/capabilities').then((c) => c.features || { reels: false, welcome_hero: false }).catch(() => { featuresP = null; return { reels: false, welcome_hero: false }; });
+  return featuresP;
 }

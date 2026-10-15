@@ -55,6 +55,7 @@ export function PostCard({ post, onChange, onDelete }: { post: Post; onChange: (
         </form>
       ) : post.body && <p className="body">{post.body}</p>}
       {post.image_path && <img className="postimg" src={post.image_path} alt="" loading="lazy" />}
+      {post.kind === 'reel' && post.poster_path && <Link to={`/reels/${post.id}`} className="reelthumb" aria-label="Watch reel"><img src={post.poster_path} alt="" loading="lazy" /><span><Icon name="play" /> Reel{post.view_count ? ` · ${post.view_count} views` : ''}</span></Link>}
       {err && <p className="error">{err}</p>}
       <div className="counts meta">{post.like_count > 0 && <span>❤️ {post.like_count}</span>}<span className="grow" />{post.comment_count > 0 && <button className="linkish" onClick={() => setShowComments(true)}>{post.comment_count} comment{post.comment_count === 1 ? '' : 's'}</button>}</div>
       <div className="actions">
@@ -66,7 +67,7 @@ export function PostCard({ post, onChange, onDelete }: { post: Post; onChange: (
   );
 }
 
-function Comments({ post, onCount }: { post: Post; onCount: (n: number) => void }) {
+export function Comments({ post, onCount }: { post: Post; onCount: (n: number) => void }) {
   const { me } = useSession();
   const [items, setItems] = useState<Comment[] | null>(null);
   const [replyTo, setReplyTo] = useState<Comment | null>(null);

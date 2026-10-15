@@ -18,8 +18,14 @@ export const config = {
   features: {
     signupPow: (env.FEATURE_SIGNUP_POW ?? '1') !== '0',
     reports: (env.FEATURE_REPORTS ?? '1') !== '0',
+    reels: (env.FEATURE_REELS ?? '1') !== '0',
+    welcomeHero: (env.FEATURE_WELCOME_HERO ?? '1') !== '0',
   },
   powBits: Number(env.POW_BITS || (isTest ? 4 : 17)),
   codeSecret: env.CODE_SECRET || 'dev-only-secret',
   maxUploadBytes: 5 * 1024 * 1024,
+  maxVideoBytes: 50 * 1024 * 1024,
+  maxVideoSeconds: 60,
+  ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',
+  ffprobePath: env.FFPROBE_PATH || 'ffprobe',
 };

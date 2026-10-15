@@ -8,7 +8,7 @@ import { IdentifierInput } from '../components/Identifier';
 
 // Full-screen white page with the logo centred at the top (signup + onboarding), with a slide between steps.
 export function FlowShell({ stepKey, back, children }: { stepKey: string | number; back?: boolean; children: React.ReactNode }) {
-  return <div className="flow"><header className="flowlogo"><img src={brand.logoUrl} width={52} height={52} alt={brand.name} /></header>
+  return <div className="flow"><header className="flowlogo"><img src={brand.logoUrl} width={52} height={52} alt={brand.name} /><i className="flowline" aria-hidden /></header>
     <main key={stepKey} className={`flowstep ${back ? 'slide-back' : 'slide-fwd'}`}>{children}</main></div>;
 }
 export function AuthShell({ title, children }: { title: string; children: React.ReactNode }) {

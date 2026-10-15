@@ -43,6 +43,8 @@ if ! grep -q '^APP_URL=' .env; then
 fi
 chmod 600 .env ADMIN_CREDENTIALS.txt 2>/dev/null || true   # secrets readable by owner only
 [ -d node_modules ] || npm ci --no-audit --no-fund
+# ffmpeg (free, Debian package) is needed to process Reels uploads; reels uploads return 503 without it.
+command -v ffmpeg >/dev/null || { sudo -n apt-get update -qq && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg >/dev/null; } || echo "WARNING: ffmpeg missing, reel uploads disabled"
 npm run build >/dev/null
 bash scripts/backup-local.sh || echo "WARNING: pre-start local backup failed"
 npm run seed

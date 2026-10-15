@@ -17,6 +17,7 @@ import { parseIdentifier, identCol, FullName, BirthDate, generateUsername } from
 import { loadUser, requireVerified, requireAuth, requireAdmin, requireModerator, csrfGuard, createSession, destroySession } from './auth.js';
 import { upload, saveImage, removeImage, HttpError } from './uploads.js';
 import { notify, registerSocial } from './social.js';
+import { registerReels } from './reels.js';
 import { newChallenge, verifyPow } from './pow.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,7 +67,8 @@ const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility =
 // author of a post/comment: the page when posted "as a page", otherwise the user
 const authorJson = (alias, userAlias) => `CASE WHEN ${alias}.as_space_id IS NOT NULL THEN (SELECT json_build_object('id', s.id, 'username', s.slug, 'full_name', s.name, 'avatar_path', s.photo_path, 'space', true, 'kind', s.kind) FROM spaces s WHERE s.id = ${alias}.as_space_id)
   ELSE json_build_object('id', ${userAlias}.id, 'username', ${userAlias}.username, 'full_name', ${userAlias}.full_name, 'avatar_path', ${userAlias}.avatar_path) END`;
-const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at,
+const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at, p.kind, p.video_path, p.poster_path, p.video_seconds,
+  (SELECT count(*)::int FROM reel_views rv WHERE rv.post_id = p.id) AS view_count,
   ${authorJson('p', 'u')} AS author, (p.author_id = $1) AS is_mine,
   (SELECT json_build_object('slug', s.slug, 'name', s.name, 'kind', s.kind) FROM spaces s WHERE s.id = p.space_id) AS space,
   (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
@@ -101,7 +103,7 @@ export function createApp() {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(helmet({
-    contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], connectSrc: ["'self'"], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
+    contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], mediaSrc: ["'self'", 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], connectSrc: ["'self'"], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
     crossOriginResourcePolicy: { policy: 'same-origin' },
   }));
   app.use(compression({ threshold: 1024 }));
@@ -133,7 +135,7 @@ export function createApp() {
   const requireChannel = (id) => {
     if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
   };
-  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow }));
+  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero } }));
   api.get('/auth/challenge', authLimiter, (_req, res) => res.json(newChallenge()));
   const MAX_ACCOUNTS = 10;
   const accountsFor = async (id, { verifiedOnly = true } = {}) => (await q(
@@ -336,7 +338,7 @@ export function createApp() {
   });
 
   // ---------- posts ----------
-  api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, null, [], req.query.cursor, req.query.limit)));
+  api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, "p.kind = 'post'", [], req.query.cursor, req.query.limit)));
   api.post('/posts', requireVerified, upload.single('image'), async (req, res) => {
     const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined });
     if (!d.body && !req.file) return res.status(400).json({ error: 'Write something or add a photo' });
@@ -360,7 +362,7 @@ export function createApp() {
     res.json(p);
   });
   const ownPost = async (req, res) => {
-    const { rows } = await q(`SELECT p.id, p.author_id, p.image_path, p.body FROM posts p WHERE p.id = $2 AND ${VISIBLE}`, [req.user.id, id(req.params.id)]);
+    const { rows } = await q(`SELECT p.id, p.author_id, p.image_path, p.video_path, p.poster_path, p.body FROM posts p WHERE p.id = $2 AND ${VISIBLE}`, [req.user.id, id(req.params.id)]);
     if (!rows[0]) { res.status(404).json({ error: 'Post not found' }); return null; }
     if (rows[0].author_id !== req.user.id) { res.status(403).json({ error: 'You can only change your own posts' }); return null; }
     return rows[0];
@@ -370,7 +372,7 @@ export function createApp() {
     const post = await ownPost(req, res); if (!post) return;
     const body = d.body ?? post.body;
     const image = d.remove_image ? null : post.image_path;
-    if (!body && !image) return res.status(400).json({ error: 'A post needs text or a photo' });
+    if (!body && !image && !post.video_path) return res.status(400).json({ error: 'A post needs text or a photo' });
     await q('UPDATE posts SET body = $1, image_path = $2, visibility = COALESCE($3, visibility), updated_at = now() WHERE id = $4 AND author_id = $5', [body, image, d.visibility ?? null, post.id, req.user.id]);
     if (d.remove_image) removeImage(post.image_path);
     res.json(await getVisiblePost(req.user.id, post.id));
@@ -378,7 +380,7 @@ export function createApp() {
   api.delete('/posts/:id', requireAuth, async (req, res) => {
     const post = await ownPost(req, res); if (!post) return;
     await q('DELETE FROM posts WHERE id = $1 AND author_id = $2', [post.id, req.user.id]);
-    removeImage(post.image_path);
+    removeImage(post.image_path); removeImage(post.video_path); removeImage(post.poster_path);
     res.json({ ok: true });
   });
   const likeCount = async (postId) => (await q('SELECT count(*) AS n FROM post_likes WHERE post_id = $1', [postId])).rows[0].n;
@@ -483,7 +485,7 @@ export function createApp() {
   api.post('/me/delete', requireAuth, async (req, res) => {
     await checkPassword(req);
     const { rows: files } = await q(`SELECT avatar_path AS p FROM users WHERE id = $1 UNION ALL SELECT cover_path FROM users WHERE id = $1
-      UNION ALL SELECT image_path FROM posts WHERE author_id = $1 OR space_id IN (SELECT id FROM spaces WHERE owner_id = $1)
+      UNION ALL SELECT unnest(ARRAY[image_path, video_path, poster_path]) FROM posts WHERE author_id = $1 OR space_id IN (SELECT id FROM spaces WHERE owner_id = $1)
       UNION ALL SELECT photo_path FROM spaces WHERE owner_id = $1 UNION ALL SELECT ph.path FROM listing_photos ph JOIN listings l ON l.id = ph.listing_id WHERE l.seller_id = $1`, [req.user.id]);
     await q('DELETE FROM users WHERE id = $1', [req.user.id]); // cascades to sessions, posts, comments, likes, etc.
     for (const f of files) removeImage(f.p);
@@ -530,6 +532,7 @@ export function createApp() {
     res.json(await pagePosts(req.user.id, 'lower(p.body) LIKE $2', [like], cursor, req.query.limit));
   });
   registerSocial(api, { requireAuth, requireVerified, id, pagePosts, checkPassword, BCRYPT_COST, config });
+  registerReels(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility });
 
   // ---------- reports & moderation ----------
   const ReportSchema = z.object({ target_type: z.enum(['post', 'user']), post_id: z.number().int().positive().optional(), username: z.string().max(40).optional(), reason: z.string().trim().min(3, 'Tell us briefly what is wrong').max(500) }).strict();
@@ -643,7 +646,7 @@ export function createApp() {
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     if (err instanceof ZodError) return res.status(400).json({ error: err.issues[0]?.message || 'Invalid input', issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
-    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Image must be 5 MB or smaller' });
+    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: err.field === 'video' ? 'Video must be 50 MB or smaller' : 'Image must be 5 MB or smaller' });
     if (err?.name === 'MulterError') return res.status(400).json({ error: err.message });
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
     if (err?.status && err.status < 500) return res.status(err.status).json({ error: err.message });

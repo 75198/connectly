@@ -10,7 +10,8 @@ This repo is **public**. Never commit secrets, `.env`, passwords, database dumps
 | Auth | httpOnly `cx_session` cookie (SameSite=Strict), SHA-256 token hash in `sessions`; CSRF header `X-Connectly-CSRF: 1` | `server/auth.js` |
 | Bot check | Self-hosted proof-of-work on signup (no third-party CAPTCHA) | `server/pow.js`, `web/src/lib/pow.worker.ts` |
 | DB | PostgreSQL 15, plain SQL migrations | `server/migrations/NNN_name.sql`, runner `server/migrate.js` |
-| Files | Images re-encoded by sharp | `uploads/` (gitignored) |
+| Files | Images re-encoded by sharp; reel videos re-encoded by ffmpeg | `uploads/` (gitignored), `uploads/reels/` |
+| Reels | Posts with `kind = 'reel'` (video_path, poster_path, video_seconds) + `reel_views` | `server/reels.js`, `web/src/pages/Reels.tsx` |
 | Email/SMS | SMTP via nodemailer (optional); SMS not configured | `server/mailer.js`, `server/sms.js` |
 
 Every post read goes through the SQL `VISIBLE` clause in `server/app.js` (visibility, blocks, hidden posts, suspended authors). Add new read paths through it.
@@ -58,6 +59,9 @@ Flags live in `server/config.js` → `config.features` and are read from env var
 |---|---|---|
 | `FEATURE_SIGNUP_POW` | 1 | Require the proof-of-work bot check on `/api/auth/register` |
 | `FEATURE_REPORTS` | 1 | Enable `POST /api/reports` |
+| `FEATURE_REELS` | 1 | Reels API (`/api/reels*`) and the Reels entries in the Home header, sidebar and Create menu |
+| `FEATURE_WELCOME_HERO` | 1 | Animated video landing screen at `/` for logged-out visitors (off: `/` goes straight to Log in) |
+Flags the client needs are exposed read-only in `GET /api/auth/capabilities` → `features`.
 Other tunables: `POW_BITS` (default 17, about 1-3 s in a phone browser; raise it if bots get through).
 
 ## 7. Backups & restore
@@ -78,3 +82,17 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - Privacy: user IPs are not sent to any third party (the old ipapi.co lookup was removed). Login history keeps time, method and device.
 - Passwords: bcrypt cost 12. Codes are HMAC'd with `CODE_SECRET`. Responses never reveal whether an account exists.
 - Moderation endpoints require the `admin` or `moderator` role. Admins cannot be suspended until their admin role is removed.
+
+## 9. Reels (round 5)
+- A reel is a row in `posts` with `kind = 'reel'` (migration `008_reels.sql`, additive). Because it is a post, the `VISIBLE` clause, blocks, likes, comments, reports and moderation (hide/suspend) all apply unchanged. The Home feed shows only `kind = 'post'`; reels have their own feed (`GET /api/reels`).
+- Upload `POST /api/reels` (multipart field `video`, optional `body`, `visibility`): MP4/MOV/WebM/3GP only, max **50 MB** and **60 s**. Files are written to a temp dir (not RAM), probed with `ffprobe`, re-encoded with `ffmpeg` (H.264 main, CRF 28, max 720x1280, max 30 fps, AAC 96k, `+faststart`, metadata stripped), and a 540x960 WebP poster is made. Rate limit: 20 uploads/hour per IP.
+- ffmpeg is a free Debian package. `scripts/codespace-start.sh` installs it if missing; without it uploads return 503 and viewing still works. Override binaries with `FFMPEG_PATH` / `FFPROBE_PATH`.
+- Views: `POST /api/reels/:id/view` after ~2 s of playback; one per viewer, the author's own views are not counted.
+- Client: full-screen vertical scroll-snap feed at `/reels` (`/reels/:id` opens a specific reel, used for share links). Only the visible reel plays; neighbours get `preload="metadata"` (none on Data Saver), everything else loads nothing. Autoplay is muted; tap to unmute. Entry points: Home header icon, Reels card at the top of the Home feed, desktop sidebar, and the Create page menu. The bottom nav order (Home, Search, Create, Marketplace, Profile) is unchanged.
+
+## 10. Branding, landing and welcome (round 5)
+- Logo: `web/public/logo.svg` (original). Icons `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png` are generated from it with sharp. The service worker cache name was bumped to `cx-static-v2` so phones pick up the new icons.
+- Logged-out `/` shows the animated hero (`web/src/pages/Hero.tsx`) with a ~200 KB looping, muted stock video. Users with reduced motion or Data Saver get the still poster. Media licences are listed in `docs/CREDITS.md`.
+- Signup and onboarding screens stay full white with the logo at the top, with no step counters and no placeholder examples. The brand touch is a logo pop-in and an animated accent line.
+- After onboarding finishes, a one-time "Welcome, <first name>" screen (`web/src/pages/Welcome.tsx`, triggered with sessionStorage `cx-show-welcome`) shows highlights, then opens the Home feed.
+- Mobile screenshots: `python3 scripts/round5_screens.py http://localhost:3000 a.mp4 b.mp4` → `screenshots/round5/` (gitignored).

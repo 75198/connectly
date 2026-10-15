@@ -13,7 +13,7 @@ export function Avatar({ user, size = 40 }: { user: Pick<Author, 'full_name' | '
 export function UserLink({ user }: { user: Author }) {
   return <Link to={authorHref(user)} className="ulink">{user.full_name}</Link>;
 }
-export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' | 'search' | 'bell' | 'pin' | 'shop' | 'flag' | 'x' | 'back' | 'chev' }) {
+export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' | 'search' | 'bell' | 'pin' | 'shop' | 'flag' | 'x' | 'back' | 'chev' | 'reel' | 'share' | 'eye' | 'volume' | 'mute' | 'play' }) {
   const p: Record<string, JSX.Element> = {
     home: <path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z" />,
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
@@ -38,6 +38,12 @@ export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shie
     bell: <><path d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.9 1.9 0 003.4 0" /></>,
     pin: <><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.5" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
+    reel: <><rect x="3" y="3" width="18" height="18" rx="5" /><path d="M3 8h18M8 3l3 5M14 3l3 5" /><path d="M10 11.5v5l4.5-2.5z" /></>,
+    share: <><path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7" /><path d="M12 3v12M7 8l5-5 5 5" /></>,
+    eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
+    volume: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16 9a4 4 0 010 6M18.5 6.5a7.5 7.5 0 010 11" /></>,
+    mute: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 9l5 6M22 9l-5 6" /></>,
+    play: <path fill="currentColor" d="M8 5v14l11-7z" />,
     more: <><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></>,
   };
   return <svg className="icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{p[name]}</svg>;
