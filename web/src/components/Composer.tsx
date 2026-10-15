@@ -3,10 +3,10 @@ import { api, Post } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon } from './ui';
 
-export function Composer({ onPosted, autoFocus }: { onPosted: (p: Post) => void; autoFocus?: boolean }) {
+export function Composer({ onPosted, autoFocus, spaceId }: { onPosted: (p: Post) => void; autoFocus?: boolean; spaceId?: number }) {
   const { me } = useSession();
   const [body, setBody] = useState('');
-  const [vis, setVis] = useState<'public' | 'friends' | 'private'>('public');
+  const [vis, setVis] = useState<'public' | 'friends' | 'private'>(me?.default_post_visibility || 'public');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
@@ -22,7 +22,7 @@ export function Composer({ onPosted, autoFocus }: { onPosted: (p: Post) => void;
   async function submit(e: FormEvent) {
     e.preventDefault(); setErr('');
     if (!body.trim() && !file) return setErr('Write something or add a photo.');
-    const fd = new FormData(); fd.append('body', body); fd.append('visibility', vis); if (file) fd.append('image', file);
+    const fd = new FormData(); fd.append('body', body); fd.append('visibility', vis); if (spaceId) fd.append('space_id', String(spaceId)); if (file) fd.append('image', file);
     setBusy(true);
     try { const p = await api<Post>('/posts', { form: fd }); setBody(''); setFile(null); if (input.current) input.current.value = ''; onPosted(p); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
@@ -30,15 +30,16 @@ export function Composer({ onPosted, autoFocus }: { onPosted: (p: Post) => void;
   if (!me) return null;
   return (
     <form className="card composer" onSubmit={submit} aria-label="Create post">
-      <div className="row"><Avatar user={me} /><textarea autoFocus={autoFocus} value={body} onChange={(e) => setBody(e.target.value)} maxLength={5000} placeholder={`What's on your mind, ${me.full_name.split(' ')[0]}?`} rows={3} /></div>
+      {me.acting_as && !spaceId && <p className="meta small">Posting as <b>{me.acting_as.name}</b></p>}
+      <div className="row"><Avatar user={me.acting_as ? { full_name: me.acting_as.name, avatar_path: me.acting_as.photo_path } : me} /><textarea autoFocus={autoFocus} value={body} onChange={(e) => setBody(e.target.value)} maxLength={5000} placeholder={spaceId ? 'Write something…' : `What's on your mind, ${(me.acting_as?.name || me.full_name).split(' ')[0]}?`} aria-label="Post text" rows={3} /></div>
       {preview && <div className="preview"><img src={preview} alt="Selected" /><button type="button" className="chip" onClick={() => { setFile(null); if (input.current) input.current.value = ''; }}>Remove photo</button></div>}
       {err && <p className="error">{err}</p>}
       <div className="row between wrap">
         <div className="row">
           <label className="btn ghost"><Icon name="image" /> Photo<input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={(e) => pick(e.target.files?.[0])} /></label>
-          <select value={vis} onChange={(e) => setVis(e.target.value as any)} aria-label="Who can see this">
+          {!spaceId && <select value={vis} onChange={(e) => setVis(e.target.value as any)} aria-label="Who can see this">
             <option value="public">🌍 Public</option><option value="friends">👥 Friends</option><option value="private">🔒 Only me</option>
-          </select>
+          </select>}
         </div>
         <button className="btn primary" disabled={busy}>{busy ? 'Posting…' : 'Post'}</button>
       </div>

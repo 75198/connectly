@@ -23,7 +23,7 @@ export function IdentifierInput({ value, onChange, country, onCountry, autoFocus
         {(list || [{ code: 'NG', dial: '234', name: 'Nigeria' }]).map((c) => <option key={c.code} value={c.code}>{c.name} +{c.dial}</option>)}
       </select>}
       <input value={value} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} required autoCapitalize="none" autoCorrect="off" spellCheck={false}
-        inputMode={phone ? 'tel' : 'email'} autoComplete="username" placeholder="you@example.com or 0803 123 4567" maxLength={200} />
+        inputMode={phone ? 'tel' : 'email'} autoComplete="username" maxLength={200} />
     </div>
   </label>;
 }

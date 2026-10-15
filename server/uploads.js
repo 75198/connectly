@@ -12,12 +12,20 @@ export const upload = multer({
   fileFilter: (_req, file, cb) => ALLOWED.has(file.mimetype) ? cb(null, true) : cb(new HttpError(400, 'Only JPEG, PNG, WebP or GIF images are allowed')),
 });
 
+export const uploadMany = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: config.maxUploadBytes, files: 6 },
+  fileFilter: (_req, file, cb) => ALLOWED.has(file.mimetype) ? cb(null, true) : cb(new HttpError(400, 'Only JPEG, PNG, WebP or GIF images are allowed')),
+});
+
 export class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
 const PRESETS = {
   avatar: (s) => s.resize(400, 400, { fit: 'cover' }),
   cover: (s) => s.resize(1500, 500, { fit: 'cover' }),
   post: (s) => s.resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }),
+  listing: (s) => s.resize(1400, 1400, { fit: 'inside', withoutEnlargement: true }),
+  space: (s) => s.resize(400, 400, { fit: 'cover' }),
 };
 
 // Re-encodes the image (drops EXIF/GPS metadata and any non-image payload). Returns public path.

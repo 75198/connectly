@@ -1,12 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Comment, Post, timeAgo } from '../api';
+import { api, authorHref, Comment, Post, timeAgo } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon, UserLink, VIS_ICON, VIS_LABEL } from './ui';
 
 export function PostCard({ post, onChange, onDelete }: { post: Post; onChange: (p: Post) => void; onDelete: (id: number) => void }) {
   const { me } = useSession();
-  const mine = me?.id === post.author.id;
+  const mine = post.is_mine;
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.body); const [dvis, setDvis] = useState(post.visibility);
@@ -32,8 +32,8 @@ export function PostCard({ post, onChange, onDelete }: { post: Post; onChange: (
     <article className="card post">
       <header className="row between">
         <div className="row">
-          <Link to={`/u/${post.author.username}`}><Avatar user={post.author} /></Link>
-          <div><UserLink user={post.author} />
+          <Link to={authorHref(post.author)}><Avatar user={post.author} /></Link>
+          <div><UserLink user={post.author} />{post.space && !post.author.space && <> <span className="meta">▸</span> <Link className="ulink" to={`/s/${post.space.slug}`}>{post.space.name}</Link></>}
             <div className="meta"><time dateTime={post.created_at} title={new Date(post.created_at).toLocaleString()}>{timeAgo(post.created_at)}</time>{post.updated_at !== post.created_at && ' · edited'} · <span title={VIS_LABEL[post.visibility]} className="vis"><Icon name={VIS_ICON[post.visibility]} /></span></div>
           </div>
         </div>
@@ -79,7 +79,7 @@ function Comments({ post, onCount }: { post: Post; onCount: (n: number) => void 
       <div className="grow"><div className="bubble"><UserLink user={c.author} /><p>{c.body}</p></div>
         <div className="meta row small"><time title={new Date(c.created_at).toLocaleString()}>{timeAgo(c.created_at)}</time>
           <button className="linkish" onClick={() => setReplyTo(c)}>Reply</button>
-          {(me?.id === c.author.id || me?.id === post.author.id) && <button className="linkish" onClick={() => remove(c)}>Delete</button>}</div>
+          {(c.is_mine || post.is_mine) && <button className="linkish" onClick={() => remove(c)}>Delete</button>}</div>
       </div>
     </div>
   );

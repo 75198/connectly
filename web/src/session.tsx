@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, ReactNode 
 import { api, User } from './api';
 import { applyTheme, ThemeMode } from './brand';
 
-type Ctx = { me: User | null; loading: boolean; refresh: () => Promise<void>; logout: () => Promise<void>; theme: ThemeMode; toggleTheme: () => void };
+type Ctx = { me: User | null; loading: boolean; refresh: () => Promise<void>; logout: (save?: boolean) => Promise<void>; theme: ThemeMode; toggleTheme: () => void };
 const SessionCtx = createContext<Ctx>(null!);
 export const useSession = () => useContext(SessionCtx);
 
@@ -17,7 +17,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try { setMe(await api<User>('/me')); } catch { setMe(null); } finally { setLoading(false); }
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
-  const logout = async () => { await api('/auth/logout', { method: 'POST' }); setMe(null); };
+  const logout = async (save = false) => { await api('/auth/logout', { json: { save } }); setMe(null); };
   const toggleTheme = () => setTheme((t) => { const n = t === 'dark' ? 'light' : 'dark'; localStorage.setItem('cx-theme', n); return n; });
   return <SessionCtx.Provider value={{ me, loading, refresh, logout, theme, toggleTheme }}>{children}</SessionCtx.Provider>;
 }

@@ -5,3 +5,4 @@ uploads
 ADMIN_CREDENTIALS.txt
 *.log
 .test-uploads
+data/

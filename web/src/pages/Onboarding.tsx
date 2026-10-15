@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon } from '../components/ui';
-import { AuthShell } from './Auth';
+import { FlowShell } from './Auth';
 
-const STEPS = ['Profile photo', 'Notifications', 'Location', 'Contacts'];
+const STEPS = ['Add a profile photo', 'Stay in the loop', 'Where are you?', 'Find people you know'];
 type Match = { id: number; username: string; full_name: string; avatar_path: string | null };
 
 async function sha256(s: string) {
@@ -19,7 +19,8 @@ export function Onboarding() {
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [note, setNote] = useState('');
   const [matches, setMatches] = useState<Match[] | null>(null);
   const contactsSupported = typeof navigator !== 'undefined' && 'contacts' in navigator && 'select' in ((navigator as any).contacts || {});
-  const go = (n: number) => { setErr(''); setNote(''); setStep(n); };
+  const [back, setBack] = useState(false);
+  const go = (n: number) => { setBack(n < step); setErr(''); setNote(''); setStep(n); };
   const finish = async () => { setBusy(true); try { await api('/me/onboarding-complete', { method: 'POST' }); await refresh(); } catch (e: any) { setErr(e.message); setBusy(false); } };
   const next = () => (step === STEPS.length - 1 ? finish() : go(step + 1));
   const run = async (fn: () => Promise<void>) => { setErr(''); setBusy(true); try { await fn(); } catch (e: any) { setErr(e.message || 'Something went wrong'); } finally { setBusy(false); } };
@@ -54,9 +55,8 @@ export function Onboarding() {
   });
 
   if (!me) return null;
-  return <AuthShell title={`Welcome, ${me.full_name.split(' ')[0]}!`}>
-    <p className="steplabel">Set up {step + 1} of {STEPS.length} · {STEPS[step]}</p>
-    <div className="progress"><div style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
+  return <FlowShell stepKey={step} back={back}>
+    <h1 className="flowtitle">{STEPS[step]}</h1>
     <div className="stack">
       {step === 0 && <>
         <div className="bignote"><Avatar user={me} size={96} /></div>
@@ -87,5 +87,5 @@ export function Onboarding() {
         {step === 3 ? (matches !== null || !contactsSupported ? 'Go to my feed' : 'Skip & go to my feed') : (step === 0 && me.avatar_path) || note ? 'Continue' : 'Skip'}</button>
       {step > 0 && <button className="linkish" onClick={() => go(step - 1)}>Back</button>}
     </div>
-  </AuthShell>;
+  </FlowShell>;
 }

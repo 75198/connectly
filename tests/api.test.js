@@ -37,13 +37,15 @@ after(() => pool.end());
 let A, B, C;
 test('signup steps: identifier check, name, age, terms, uniqueness', async () => {
   A = await register('alice'); B = await register('bob'); C = await register('carol');
-  let r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'ALICE@t.io' }); assert.equal(r.status, 409);
+  let r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'ALICE@t.io', password: 'Password123!' }); assert.equal(r.status, 409); assert.equal(r.body.code, 'SAME_DETAILS');
+  r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'ALICE@t.io', password: 'Different123!' }); assert.equal(r.status, 200, 'same email, different password allowed');
+  assert.ok(testOutbox.some((m) => m.to === 'alice@t.io' && m.subject === 'Welcome to Connectly'), 'welcome email after verification');
   r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'new@t.io' }); assert.equal(r.body.type, 'email');
   r = await post(agent(), '/api/auth/check-identifier').send({ identifier: 'not-an-email@' }); assert.equal(r.status, 400);
   r = await post(agent(), '/api/auth/check-identifier').send({ identifier: '0803 123 4567', country: 'NG' });
   assert.equal(r.status, 400); assert.match(r.body.error, /Phone sign-up is coming soon/);
   r = await signup(agent(), 'p@t.io', { identifier: '+2348031234567' }); assert.equal(r.status, 400, 'phone disabled server-side without SMS');
-  r = await signup(agent(), 'alice@t.io'); assert.equal(r.status, 409);
+  r = await signup(agent(), 'alice@t.io'); assert.equal(r.status, 409); assert.equal(r.body.code, 'SAME_DETAILS');
   r = await signup(agent(), 'n1@t.io', { full_name: 'R2D2 Robot' }); assert.equal(r.status, 400);
   r = await signup(agent(), 'n1@t.io', { full_name: "Mary-Jane O'Neil" }); assert.equal(r.status, 201);
   const young = new Date(); young.setUTCFullYear(young.getUTCFullYear() - 12);
@@ -125,29 +127,60 @@ test('verification code: pending cannot log in, attempts, resend cooldown, expir
   r = await signup(agent(), 'fay@t.io', { full_name: 'Fay Again' }); assert.equal(r.status, 201);
 });
 
-test('password reset with 6-digit code', async () => {
-  let r = await post(agent(), '/api/auth/forgot').send({ identifier: 'carol@t.io' });
-  assert.equal(r.status, 200);
-  r = await post(agent(), '/api/auth/forgot').send({ identifier: 'nobody@t.io' });
-  assert.equal(r.status, 200); // no account enumeration
-  const code = lastCode('carol@t.io');
-  const wrong = code === '123456' ? '654321' : '123456';
-  r = await post(agent(), '/api/auth/reset').send({ identifier: 'carol@t.io', code: wrong, password: 'NewPassword1!' });
-  assert.equal(r.status, 400);
-  r = await post(agent(), '/api/auth/reset').send({ identifier: 'carol@t.io', code, password: 'NewPassword1!' });
-  assert.equal(r.status, 200);
-  r = await post(agent(), '/api/auth/reset').send({ identifier: 'carol@t.io', code, password: 'Another123!' });
-  assert.equal(r.status, 400, 'code single use');
+test('multiple accounts per email: login picks the account whose password matches', async () => {
+  const a2 = agent();
+  let r = await signup(a2, 'alice@t.io', { password: 'SecondAcct123!', full_name: 'Alice Business' }); assert.equal(r.status, 201);
+  r = await post(a2, '/api/auth/verify').send({ identifier: 'alice@t.io', code: lastCode('alice@t.io') }); assert.equal(r.status, 200);
+  const second = (await a2.get('/api/me')).body; assert.equal(second.full_name, 'Alice Business');
+  const l1 = agent(); r = await post(l1, '/api/auth/login').send({ login: 'alice@t.io', password: 'Password123!' }); assert.equal(r.status, 200);
+  assert.equal((await l1.get('/api/me')).body.username, 'alice');
+  const l2 = agent(); r = await post(l2, '/api/auth/login').send({ login: 'ALICE@t.io', password: 'SecondAcct123!' }); assert.equal(r.status, 200);
+  assert.equal((await l2.get('/api/me')).body.id, second.id);
+  r = await post(agent(), '/api/auth/login').send({ login: 'alice@t.io', password: 'Nope12345!' }); assert.equal(r.status, 401);
+});
+
+test('password reset with code then pick account', async () => {
+  let r = await post(agent(), '/api/auth/forgot').send({ identifier: 'alice@t.io' }); assert.equal(r.status, 200);
+  r = await post(agent(), '/api/auth/forgot').send({ identifier: 'nobody@t.io' }); assert.equal(r.status, 200, 'no enumeration');
+  const code = lastCode('alice@t.io'); const wrong = code === '123456' ? '654321' : '123456';
+  r = await post(agent(), '/api/auth/code-accounts').send({ identifier: 'alice@t.io', code: wrong, purpose: 'reset_password' }); assert.equal(r.status, 400);
+  r = await post(agent(), '/api/auth/code-accounts').send({ identifier: 'alice@t.io', code, purpose: 'reset_password' });
+  assert.equal(r.status, 200); assert.equal(r.body.accounts.length, 2); assert.equal(r.body.accounts[0].password_hash, undefined);
+  const { ticket } = r.body; const biz = r.body.accounts.find((x) => x.full_name === 'Alice Business');
+  r = await post(agent(), '/api/auth/reset').send({ ticket, user_id: 2, password: 'Hacked1234!' }); assert.equal(r.status, 403, 'cannot reset an account not on this email');
+  r = await post(agent(), '/api/auth/reset').send({ ticket, user_id: biz.id, password: 'Password123!' }); assert.equal(r.status, 409, 'cannot collide with sibling password');
+  r = await post(agent(), '/api/auth/reset').send({ ticket, user_id: biz.id, password: 'BizNew12345!' }); assert.equal(r.status, 200);
+  r = await post(agent(), '/api/auth/reset').send({ ticket, user_id: biz.id, password: 'Again12345!' }); assert.equal(r.status, 400, 'ticket single use');
+  const l = agent(); r = await post(l, '/api/auth/login').send({ login: 'alice@t.io', password: 'BizNew12345!' }); assert.equal(r.status, 200);
+  assert.equal((await l.get('/api/me')).body.id, biz.id);
+  // carol: old sessions revoked after reset
+  await post(agent(), '/api/auth/forgot').send({ identifier: 'carol@t.io' });
+  r = await post(agent(), '/api/auth/code-accounts').send({ identifier: 'carol@t.io', code: lastCode('carol@t.io'), purpose: 'reset_password' });
+  r = await post(agent(), '/api/auth/reset').send({ ticket: r.body.ticket, user_id: r.body.accounts[0].id, password: 'NewPassword1!' }); assert.equal(r.status, 200);
   r = await C.get('/api/me'); assert.equal(r.status, 401, 'old sessions revoked');
-  C = agent();
-  r = await post(C, '/api/auth/login').send({ login: 'carol', password: 'NewPassword1!' });
-  assert.equal(r.status, 200);
+  C = agent(); r = await post(C, '/api/auth/login').send({ login: 'carol', password: 'NewPassword1!' }); assert.equal(r.status, 200);
+});
+
+test('find account by username sends code to email on file, lists accounts only after code', async () => {
+  let r = await post(agent(), '/api/auth/find').send({ identifier: '@alice' }); assert.equal(r.status, 200); assert.equal(r.body.accounts, undefined);
+  r = await post(agent(), '/api/auth/find').send({ identifier: 'ghost_user' }); assert.equal(r.status, 200, 'same response for unknown');
+  r = await post(agent(), '/api/auth/code-accounts').send({ identifier: 'alice', code: lastCode('alice@t.io'), purpose: 'find_account' });
+  assert.equal(r.status, 200); assert.equal(r.body.accounts.length, 2); assert.match(r.body.sent_to, /^a•+@t\.io$/);
 });
 
 test('profile edit own only; cannot self-grant admin', async () => {
-  let r = await A.patch('/api/me').set(H).send({ bio: 'Hello there', location: 'Lagos', full_name: 'Alice A' });
-  assert.equal(r.status, 200); assert.equal(r.body.bio, 'Hello there');
-  r = await B.get('/api/users/alice'); assert.equal(r.body.location, 'Lagos'); assert.equal(r.body.email, undefined);
+  let r;
+  await pool.query("INSERT INTO places (id, name, ascii_name, admin1, country, country_code, population, display) VALUES (2337639,'Ikeja','Ikeja','Lagos','Nigeria','NG',313196,'Ikeja, Lagos, Nigeria'), (5308655,'Phoenix','Phoenix','Arizona','United States','US',1600000,'Phoenix, Arizona, United States'), (2332459,'Lagos','Lagos','Lagos','Nigeria','NG',9000000,'Lagos, Nigeria')");
+  let pl = await A.get('/api/places?q=ikej'); assert.equal(pl.body.items[0].display, 'Ikeja, Lagos, Nigeria');
+  pl = await A.get('/api/places?q=Phoenix'); assert.equal(pl.body.items[0].display, 'Phoenix, Arizona, United States');
+  r = await A.patch('/api/me').set(H).send({ bio: 'Hello there', current_place_id: 2337639, hometown_place_id: 2332459, full_name: 'Alice Adeyemi',
+    interests: ['Music', 'Tech', 'Music'], relationship_status: 'Married', work_company: 'Acme', work_role: 'Designer', education: 'UNILAG' });
+  assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.bio, 'Hello there'); assert.equal(r.body.location, 'Ikeja, Lagos, Nigeria'); assert.equal(r.body.hometown, 'Lagos, Nigeria');
+  assert.deepEqual(r.body.interests, ['Music', 'Tech']);
+  r = await A.patch('/api/me').set(H).send({ relationship_status: 'Whatever' }); assert.equal(r.status, 400);
+  r = await A.patch('/api/me').set(H).send({ current_place_id: 999999999 }); assert.equal(r.status, 400);
+  r = await A.patch('/api/me').set(H).send({ location: 'Lagos' }); assert.equal(r.status, 400, 'location only via place picker');
+  r = await B.get('/api/users/alice'); assert.equal(r.body.location, 'Ikeja, Lagos, Nigeria'); assert.equal(r.body.work_company, 'Acme'); assert.equal(r.body.email, undefined);
   r = await A.patch('/api/users/bob').set(H).send({ bio: 'hacked' });
   assert.equal(r.status, 403);
   r = await B.get('/api/users/bob'); assert.notEqual(r.body.bio, 'hacked');
@@ -288,6 +321,35 @@ test('contacts matching by hash only', async () => {
   r = await post(A, '/api/contacts/match').send({ hashes: ['bob@t.io'] }); assert.equal(r.status, 400, 'raw values rejected');
   const { rows } = await pool.query("SELECT count(*)::int n FROM information_schema.columns WHERE table_name LIKE '%contact%'");
   assert.equal(rows[0].n, 0, 'no contact storage');
+});
+
+test('notification settings', async () => {
+  let r = await B.get('/api/me'); assert.equal(r.body.email_notifications, true);
+  r = await B.patch('/api/me/settings').set(H).send({ email_notifications: false }); assert.equal(r.status, 200);
+  r = await B.get('/api/me'); assert.equal(r.body.email_notifications, false); assert.equal(r.body.inapp_notifications, true);
+  r = await B.patch('/api/me/settings').set(H).send({ email_notifications: true });
+});
+
+test('deactivate hides account, login reactivates; delete removes everything', async () => {
+  const d = await register('dana');
+  const p = (await post(d, '/api/posts').field('body', 'dana post').attach('image', png, { filename: 'p.png', contentType: 'image/png' })).body;
+  await post(d, '/api/me/avatar').attach('image', png, { filename: 'a.png', contentType: 'image/png' });
+  let r = await post(d, '/api/me/deactivate').send({ password: 'wrong' }); assert.equal(r.status, 403);
+  r = await post(d, '/api/me/deactivate').send({ password: 'Password123!' }); assert.equal(r.status, 200);
+  r = await d.get('/api/me'); assert.equal(r.status, 401, 'signed out');
+  r = await B.get('/api/users/dana'); assert.equal(r.status, 404, 'profile hidden');
+  r = await B.get(`/api/posts/${p.id}`); assert.equal(r.status, 404, 'posts hidden');
+  r = await B.get('/api/search?q=dana&type=people'); assert.equal(r.body.items.length, 0);
+  const d2 = agent(); r = await post(d2, '/api/auth/login').send({ login: 'dana', password: 'Password123!' }); assert.equal(r.body.reactivated, true);
+  r = await B.get('/api/users/dana'); assert.equal(r.status, 200, 'visible again');
+  const me = (await d2.get('/api/me')).body;
+  r = await post(d2, '/api/me/delete').send({ password: 'Password123!' }); assert.equal(r.status, 200);
+  r = await B.get('/api/users/dana'); assert.equal(r.status, 404);
+  const { rows } = await pool.query('SELECT (SELECT count(*)::int FROM users WHERE id=$1) u, (SELECT count(*)::int FROM posts WHERE author_id=$1) p', [me.id]);
+  assert.deepEqual(rows[0], { u: 0, p: 0 });
+  await new Promise((res) => setTimeout(res, 100));
+  r = await request(app).get(p.image_path); assert.equal(r.status, 404, 'uploaded file removed');
+  r = await request(app).get(me.avatar_path); assert.equal(r.status, 404, 'avatar removed');
 });
 
 test('security headers present', async () => {

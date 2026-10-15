@@ -6,10 +6,21 @@ export const COOKIE = 'cx_session';
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 export const randomToken = () => crypto.randomBytes(32).toString('base64url');
 
-export async function createSession(res, userId, ua) {
+// Best-effort approximate location (city, country) from IP; never blocks login.
+export async function approxLocation(ip) {
+  if (config.isTest || !ip || /^(127\.|10\.|192\.168\.|::1|::ffff:127\.)/.test(ip)) return '';
+  try {
+    const r = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`, { headers: { 'User-Agent': 'Connectly/0.1' }, signal: AbortSignal.timeout(3000) });
+    const j = await r.json(); return [j.city, j.country_name].filter(Boolean).join(', ').slice(0, 80);
+  } catch { return ''; }
+}
+export async function createSession(res, userId, ua, req = null, method = 'password') {
   const token = randomToken();
   const expires = new Date(Date.now() + config.sessionDays * 864e5);
-  await q('INSERT INTO sessions (token_hash, user_id, expires_at, user_agent) VALUES ($1,$2,$3,$4)', [sha256(token), userId, expires, (ua || '').slice(0, 300)]);
+  const ip = req?.ip || null;
+  const { rows } = await q('INSERT INTO sessions (token_hash, user_id, expires_at, user_agent, ip) VALUES ($1,$2,$3,$4,$5) RETURNING id', [sha256(token), userId, expires, (ua || '').slice(0, 300), ip]);
+  const { rows: h } = await q('INSERT INTO login_history (user_id, method, ip, user_agent) VALUES ($1,$2,$3,$4) RETURNING id', [userId, method, ip, (ua || '').slice(0, 300)]);
+  approxLocation(ip).then((loc) => loc && Promise.all([q('UPDATE sessions SET approx_location = $1 WHERE id = $2', [loc, rows[0].id]), q('UPDATE login_history SET approx_location = $1 WHERE id = $2', [loc, h[0].id])])).catch(() => {});
   res.cookie(COOKIE, token, { httpOnly: true, secure: config.cookieSecure, sameSite: 'strict', expires, path: '/' });
 }
 
@@ -25,13 +36,14 @@ export async function loadUser(req, _res, next) {
   const t = req.cookies?.[COOKIE];
   if (t) {
     const { rows } = await q(
-      `SELECT u.id, u.username, u.full_name, u.email, u.email_verified_at,
+      `SELECT u.id, u.username, u.full_name, u.email, u.email_verified_at, s.id AS session_id, s.acting_space_id, (s.last_seen_at < now() - interval '5 minutes') AS stale,
               COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
          FROM sessions s JOIN users u ON u.id = s.user_id
          LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id
         WHERE s.token_hash = $1 AND s.expires_at > now()
-        GROUP BY u.id`, [sha256(t)]);
+        GROUP BY u.id, s.token_hash`, [sha256(t)]);
     req.user = rows[0] || null;
+    if (req.user?.stale) q('UPDATE sessions SET last_seen_at = now() WHERE id = $1', [req.user.session_id]).catch(() => {});
   }
   next();
 }
