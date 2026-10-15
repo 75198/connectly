@@ -7,7 +7,7 @@ import { MediaStudio } from './MediaStudio';
 type Vis = 'public' | 'friends' | 'private';
 const AUD: { k: Vis; label: string; icon: 'globe' | 'users' | 'lock'; hint: string }[] = [
   { k: 'public', label: 'Public', icon: 'globe', hint: 'Anyone on or off Connectly' },
-  { k: 'friends', label: 'Friends', icon: 'users', hint: 'Your friends on Connectly' },
+  { k: 'friends', label: 'Friends', icon: 'users', hint: 'People you follow who follow you back' },
   { k: 'private', label: 'Only me', icon: 'lock', hint: 'Only you can see it' },
 ];
 

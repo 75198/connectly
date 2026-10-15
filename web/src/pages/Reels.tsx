@@ -4,6 +4,7 @@ import { api, authorHref, Page, Post } from '../api';
 import { Avatar, Icon, Sheet, Spinner, VIS_LABEL } from '../components/ui';
 import { Comments } from '../components/PostCard';
 import { MediaStudio } from '../components/MediaStudio';
+import { EngagementSheet, trackShare, type EngTab } from '../components/Engagement';
 
 const fmt = (n = 0) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
 const saveData = () => !!(navigator as any).connection?.saveData;
@@ -69,9 +70,10 @@ function ReelItem({ i, post, active, near, muted, onMute, onChange, onComments }
     onChange({ ...post, liked_by_me: !was, like_count: post.like_count + (was ? -1 : 1) });
     try { const r = await api<{ liked_by_me: boolean; like_count: number }>(`/posts/${post.id}/like`, { method: was ? 'DELETE' : 'PUT' }); onChange({ ...post, ...r }); } catch (e: any) { onChange(post); flash(e.message); }
   }
+  const [eng, setEng] = useState<EngTab | null>(null);
   async function share() {
     const url = `${location.origin}/reels/${post.id}`;
-    try { if (navigator.share) await navigator.share({ title: 'Connectly reel', text: post.body.slice(0, 100), url }); else { await navigator.clipboard.writeText(url); flash('Link copied'); } } catch { /* cancelled */ }
+    try { if (navigator.share) { await navigator.share({ title: 'Connectly reel', text: post.body.slice(0, 100), url }); trackShare(post.id, 'native'); } else { await navigator.clipboard.writeText(url); flash('Link copied'); trackShare(post.id, 'copy_link'); } onChange({ ...post, share_count: (post.share_count || 0) + 1 }); } catch { /* cancelled */ }
   }
   async function report() {
     const reason = prompt('Why are you reporting this reel? (spam, harassment, hate speech, scam…)');
@@ -84,10 +86,11 @@ function ReelItem({ i, post, active, near, muted, onMute, onChange, onComments }
     {paused && active && <button className="reelplay" aria-label="Play" onClick={() => setPaused(false)}><Icon name="play" /></button>}
     <button className="reelmute btn icon reelbtn" aria-label={muted ? 'Unmute' : 'Mute'} onClick={onMute}><Icon name={muted ? 'mute' : 'volume'} /></button>
     {muted && active && <span className="reelhint">Tap to unmute</span>}
+    {eng && <EngagementSheet post={post} tab={eng} onClose={() => setEng(null)} />}
     <div className="reelrail">
-      <button onClick={like} aria-pressed={post.liked_by_me} aria-label="Like" className={post.liked_by_me ? 'on' : ''}><Icon name={post.liked_by_me ? 'heartFill' : 'heart'} /><small>{fmt(post.like_count)}</small></button>
-      <button onClick={onComments} aria-label="Comments"><Icon name="chat" /><small>{fmt(post.comment_count)}</small></button>
-      <button onClick={share} aria-label="Share"><Icon name="share" /><small>Share</small></button>
+      <button onClick={like} aria-pressed={post.liked_by_me} aria-label="Like" className={post.liked_by_me ? 'on' : ''}><Icon name={post.liked_by_me ? 'heartFill' : 'heart'} /></button><small className="countbtn" role="button" aria-label="See who liked" onClick={() => setEng('reactions')}>{fmt(post.like_count)}</small>
+      <button onClick={onComments} aria-label="Comments"><Icon name="chat" /></button><small className="countbtn" role="button" aria-label="See who commented" onClick={() => setEng('comments')}>{fmt(post.comment_count)}</small>
+      <button onClick={share} aria-label="Share"><Icon name="share" /></button><small className="countbtn" role="button" aria-label="See who shared" onClick={() => setEng('shares')}>{post.share_count ? fmt(post.share_count) : 'Share'}</small>
       {!post.is_mine && <button onClick={report} aria-label="Report"><Icon name="flag" /><small>Report</small></button>}
       <span className="reelviews" aria-label={`${post.view_count || 0} views`}><Icon name="eye" /><small>{fmt(post.view_count)}</small></span>
     </div>

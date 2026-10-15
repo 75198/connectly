@@ -3,12 +3,13 @@ import { Link } from 'react-router-dom';
 import { api, authorHref, Comment, Post, REACTIONS, Reaction, feelingEmoji, haptic, postTime, timeAgo, toast } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon, Sheet, UserLink, VIS_ICON, VIS_LABEL } from './ui';
+import { EngagementSheet, trackShare, type EngTab } from './Engagement';
 
 type Mode = 'feed' | 'draft' | 'deleted';
 export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Post; onChange: (p: Post) => void; onDelete: (id: number) => void; mode?: Mode }) {
   const { me } = useSession();
   const mine = post.is_mine;
-  const [menu, setMenu] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const [share, setShare] = useState(false);
+  const [menu, setMenu] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const [share, setShare] = useState(false); const [eng, setEng] = useState<EngTab | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.body); const [dvis, setDvis] = useState(post.visibility);
   const [showComments, setShowComments] = useState(false);
@@ -79,7 +80,7 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
       {mode === 'deleted' && <div className="row"><button className="btn primary grow" onClick={() => act(() => api(`/posts/${post.id}/restore`, { method: 'POST' }), 'Post restored')}>Restore</button>
         <button className="btn ghost danger" onClick={() => confirm('Delete this post forever? This cannot be undone.') && act(() => api(`/posts/${post.id}/permanent`, { method: 'DELETE' }), 'Deleted forever')}>Delete forever</button></div>}
       {mode === 'feed' && <>
-        <div className="counts meta">{post.like_count > 0 && <span className="rcount">{(top.length ? top : ['👍']).map((e, i) => <i key={i}>{e}</i>)} {post.like_count}</span>}<span className="grow" />{post.comment_count > 0 && <button className="linkish" onClick={() => setShowComments(true)}>{post.comment_count} comment{post.comment_count === 1 ? '' : 's'}</button>}</div>
+        <div className="counts meta">{post.like_count > 0 && <button className="rcount countbtn" aria-label="See who reacted" onClick={() => setEng('reactions')}>{(top.length ? top : ['👍']).map((e, i) => <i key={i}>{e}</i>)} {post.like_count}</button>}<span className="grow" />{post.comment_count > 0 && <button className="linkish" onClick={() => setEng('comments')}>{post.comment_count} comment{post.comment_count === 1 ? '' : 's'}</button>}{(post.share_count || 0) > 0 && <button className="linkish" onClick={() => setEng('shares')}>{post.share_count} share{post.share_count === 1 ? '' : 's'}</button>}</div>
         <div className="actions">
           <div className="reactwrap">
             {picker && <><div className="menuscrim" onClick={() => setPicker(false)} /><div className="reactbar" role="menu" aria-label="Reactions">{REACTIONS.map((r, i) => <button key={r.k} role="menuitem" style={{ animationDelay: `${i * 30}ms` }} aria-label={r.label} title={r.label} onClick={() => react(r.k)}>{r.e}</button>)}</div></>}
@@ -101,22 +102,24 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
           {post.kind !== 'reel' && <button className="btn ghost block" onClick={toDraft}>Move to Drafts</button>}
           <button className="btn block dangerbtn" onClick={del}>Delete</button>
           <button className="btn ghost block" onClick={() => setConfirmDel(false)}>Cancel</button></div></Sheet>}
-      {share && <ShareSheet url={`${location.origin}${post.kind === 'reel' ? '/reels/' : '/post/'}${post.id}`} text={post.body.slice(0, 120)} onClose={() => setShare(false)} />}
+      {eng && <EngagementSheet post={post} tab={eng} onClose={() => setEng(null)} />}
+      {share && <ShareSheet onShared={(c) => { trackShare(post.id, c); onChange({ ...post, share_count: (post.share_count || 0) + 1 }); }} url={`${location.origin}${post.kind === 'reel' ? '/reels/' : '/post/'}${post.id}`} text={post.body.slice(0, 120)} onClose={() => setShare(false)} />}
     </article>
   );
 }
 
-export function ShareSheet({ url, text, onClose }: { url: string; text: string; onClose: () => void }) {
+export function ShareSheet({ url, text, onClose: close, onShared }: { url: string; text: string; onClose: () => void; onShared?: (channel: string) => void }) {
   const enc = encodeURIComponent; const msg = text ? `${text} ${url}` : url;
-  const copy = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { prompt('Copy this link', url); } onClose(); };
-  const native = async () => { try { await navigator.share({ title: 'Connectly', text, url }); } catch { /* cancelled */ } onClose(); };
+  const onClose = () => close(); const did = (c: string) => () => { onShared?.(c); close(); };
+  const copy = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { prompt('Copy this link', url); } did('copy_link')(); };
+  const native = async () => { try { await navigator.share({ title: 'Connectly', text, url }); did('native')(); } catch { onClose(); } };
   return <Sheet title="Share" onClose={onClose}><div className="sharegrid">
     {typeof navigator !== 'undefined' && 'share' in navigator && <button onClick={native}><span className="shareic" style={{ background: '#0F766E' }}><Icon name="share" /></span>Share via…</button>}
     <button onClick={copy}><span className="shareic" style={{ background: '#475569' }}>🔗</span>Copy link</button>
-    <a href={`https://wa.me/?text=${enc(msg)}`} target="_blank" rel="noopener noreferrer" onClick={onClose}><span className="shareic" style={{ background: '#25D366' }}>💬</span>WhatsApp</a>
-    <a href={`https://twitter.com/intent/tweet?text=${enc(msg)}`} target="_blank" rel="noopener noreferrer" onClick={onClose}><span className="shareic" style={{ background: '#000' }}>𝕏</span>X</a>
-    <a href={`https://www.facebook.com/sharer/sharer.php?u=${enc(url)}`} target="_blank" rel="noopener noreferrer" onClick={onClose}><span className="shareic" style={{ background: '#1877F2' }}>f</span>Facebook</a>
-    <a href={`mailto:?subject=${enc('Look at this on Connectly')}&body=${enc(msg)}`} onClick={onClose}><span className="shareic" style={{ background: '#F59E0B' }}>✉️</span>Email</a>
+    <a href={`https://wa.me/?text=${enc(msg)}`} target="_blank" rel="noopener noreferrer" onClick={did('whatsapp')}><span className="shareic" style={{ background: '#25D366' }}>💬</span>WhatsApp</a>
+    <a href={`https://twitter.com/intent/tweet?text=${enc(msg)}`} target="_blank" rel="noopener noreferrer" onClick={did('x')}><span className="shareic" style={{ background: '#000' }}>𝕏</span>X</a>
+    <a href={`https://www.facebook.com/sharer/sharer.php?u=${enc(url)}`} target="_blank" rel="noopener noreferrer" onClick={did('facebook')}><span className="shareic" style={{ background: '#1877F2' }}>f</span>Facebook</a>
+    <a href={`mailto:?subject=${enc('Look at this on Connectly')}&body=${enc(msg)}`} onClick={did('email')}><span className="shareic" style={{ background: '#F59E0B' }}>✉️</span>Email</a>
   </div></Sheet>;
 }
 

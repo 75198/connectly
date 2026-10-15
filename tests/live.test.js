@@ -93,5 +93,5 @@ test('time limit auto-ends and monthly budget blocks new lives', async () => {
   assert.equal((await host.get(`/api/live/${r.body.stream.id}`)).body.end_reason, 'time_limit');
   await pool.query('UPDATE live_participants SET seconds = 4500 * 60 WHERE stream_id = $1', [r.body.stream.id]);
   const m = await host.post('/api/live').set(H).send({}); assert.equal(m.status, 429); assert.equal(m.body.limit, 'monthly');
-  assert.equal((await host.get('/api/live/status')).body.month_remaining, 0);
+  assert.equal((await host.get('/api/live/status')).body.available, false);
 });

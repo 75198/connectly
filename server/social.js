@@ -91,14 +91,33 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
   // ---------- follows ----------
   api.put('/users/:username/follow', requireVerified, async (req, res) => {
     const u = await userBy(req.params.username, req.user.id);
+    const already = (await q('SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2', [req.user.id, u.id])).rowCount;
+    if (!already) {
+      const { rows: [d] } = await q("SELECT count(*)::int AS n FROM follows WHERE follower_id = $1 AND created_at > now() - interval '24 hours'", [req.user.id]);
+      if (d.n >= (config.followDailyLimit ?? 500)) return res.status(429).json({ error: 'You’ve followed a lot of people today. Take a rest and try again tomorrow.', limit: 'follows' });
+    }
     const r = await q('INSERT INTO follows (follower_id, followee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, u.id]);
     if (r.rowCount) await notify(u.id, req.user.id, 'follow');
-    res.json({ following: true });
+    const { rows: [c] } = await q('SELECT count(*)::int AS n FROM follows WHERE followee_id = $1', [u.id]);
+    res.json({ following: true, follower_count: c.n });
   });
   api.delete('/users/:username/follow', requireAuth, async (req, res) => {
     const u = await userBy(req.params.username, req.user.id);
     await q('DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2', [req.user.id, u.id]);
-    res.json({ following: false });
+    const { rows: [c] } = await q('SELECT count(*)::int AS n FROM follows WHERE followee_id = $1', [u.id]);
+    res.json({ following: false, follower_count: c.n });
+  });
+  // Followers / following lists (blocked and deactivated accounts hidden). following_by_me lets the UI show Follow buttons.
+  for (const list of ['followers', 'following']) api.get(`/users/:username/${list}`, requireAuth, async (req, res) => {
+    const { rows: [u] } = await q('SELECT id FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL', [req.params.username]);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const [me, other] = list === 'followers' ? ['f.followee_id', 'f.follower_id'] : ['f.follower_id', 'f.followee_id'];
+    const { rows } = await q(`SELECT x.id, x.username, x.full_name, x.avatar_path, x.bio,
+        EXISTS (SELECT 1 FROM follows m WHERE m.follower_id = $2 AND m.followee_id = x.id) AS following, (x.id = $2) AS is_me
+      FROM follows f JOIN users x ON x.id = ${other} AND x.deactivated_at IS NULL AND x.suspended_at IS NULL
+      WHERE ${me} = $1 AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $2 AND b.blocked_id = x.id) OR (b.blocker_id = x.id AND b.blocked_id = $2))
+      ORDER BY f.created_at DESC LIMIT 500`, [u.id, req.user.id]);
+    res.json({ items: rows });
   });
 
   // ---------- blocks ----------

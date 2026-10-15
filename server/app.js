@@ -21,6 +21,8 @@ import { registerReels } from './reels.js';
 import { registerPostExtras } from './postextras.js';
 import { registerAi } from './ai.js';
 import { registerLive } from './live.js';
+import { registerEngagement } from './engagement.js';
+import { registerSubscriptions } from './subscriptions.js';
 import { newChallenge, verifyPow } from './pow.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,7 +67,8 @@ const id = (v) => { const n = Number(v); if (!Number.isSafeInteger(n) || n <= 0)
 // $1 is always the viewer id. Visibility is enforced in SQL for every post read.
 const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility = 'friends' AND EXISTS (
   SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND
-   ((f.requester_id = $1 AND f.addressee_id = p.author_id) OR (f.addressee_id = $1 AND f.requester_id = p.author_id)))))
+   ((f.requester_id = $1 AND f.addressee_id = p.author_id) OR (f.addressee_id = $1 AND f.requester_id = p.author_id)))
+  OR EXISTS (SELECT 1 FROM follows f1 JOIN follows f2 ON f2.follower_id = f1.followee_id AND f2.followee_id = f1.follower_id WHERE f1.follower_id = $1 AND f1.followee_id = p.author_id)))
   AND p.hidden_at IS NULL AND p.deleted_at IS NULL AND NOT p.is_draft AND NOT EXISTS (SELECT 1 FROM users su WHERE su.id = p.author_id AND su.suspended_at IS NOT NULL)
   AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $1))`;
 // author of a post/comment: the page when posted "as a page", otherwise the user
@@ -80,6 +83,7 @@ const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_
   (SELECT json_build_object('slug', s.slug, 'name', s.name, 'kind', s.kind) FROM spaces s WHERE s.id = p.space_id) AS space,
   (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
   (SELECT count(*) FROM comments c WHERE c.post_id = p.id) AS comment_count,
+  (SELECT count(*)::int FROM shares sh WHERE sh.post_id = p.id) AS share_count,
   EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me
   FROM posts p JOIN users u ON u.id = p.author_id AND (u.deactivated_at IS NULL OR u.id = $1)`;
 const publicUser = (u) => u && ({ id: u.id, username: u.username, full_name: u.full_name, bio: u.bio, location: u.location, hometown: u.hometown, interests: u.interests || [], relationship_status: u.relationship_status, work_company: u.work_company, work_role: u.work_role, education: u.education, avatar_path: u.avatar_path, cover_path: u.cover_path });
@@ -150,7 +154,7 @@ export function createApp() {
   const requireChannel = (id) => {
     if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
   };
-  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero, ai_support: config.features.aiSupport, live: config.features.live } }));
+  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero, ai_support: config.features.aiSupport, live: config.features.live, subscriptions: config.features.subscriptions } }));
   api.get('/auth/challenge', authLimiter, (_req, res) => res.json(newChallenge()));
   const MAX_ACCOUNTS = 10;
   const accountsFor = async (id, { verifiedOnly = true } = {}) => (await q(
@@ -338,13 +342,15 @@ export function createApp() {
         WHERE status IN ('pending','accepted') AND ((requester_id = $1 AND addressee_id = $2) OR (requester_id = $2 AND addressee_id = $1)) LIMIT 1) AS friend_status,
       EXISTS (SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2) AS following,
       (SELECT count(*) FROM follows WHERE followee_id = $2) AS follower_count,
+      (SELECT count(*) FROM follows WHERE follower_id = $2) AS following_count,
+      EXISTS (SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $1) AS follows_me,
       (SELECT count(*) FROM friendships WHERE status = 'accepted' AND (requester_id = $2 OR addressee_id = $2)) AS friend_count`, [me, u.id])).rows[0];
     if (rel.blocked_me || (rel.i_blocked && u.id !== me)) return res.status(404).json({ error: 'User not found' });
     const { rows: c } = await q(`SELECT count(*) AS n FROM posts p WHERE p.author_id = $2 AND p.as_space_id IS NULL AND ${VISIBLE}`, [me, u.id]);
     const pu = publicUser(u);
-    const canDetails = u.id === me || u.profile_details_visibility === 'public' || (u.profile_details_visibility === 'friends' && rel.friend_status === 'friends');
+    const canDetails = u.id === me || u.profile_details_visibility === 'public' || (u.profile_details_visibility === 'friends' && (rel.friend_status === 'friends' || (rel.following && rel.follows_me)));
     if (!canDetails) for (const k of ['bio', 'location', 'hometown', 'relationship_status', 'work_company', 'work_role', 'education']) pu[k] = ''; if (!canDetails) pu.interests = [];
-    res.json({ ...pu, post_count: c[0].n, is_me: u.id === me, friend_status: rel.friend_status || 'none', following: rel.following, follower_count: rel.follower_count, friend_count: rel.friend_count });
+    res.json({ ...pu, post_count: c[0].n, is_me: u.id === me, friend_status: rel.friend_status || 'none', following: rel.following, follower_count: Number(rel.follower_count), following_count: Number(rel.following_count), follows_me: rel.follows_me, friend_count: rel.friend_count, tier: config.features.subscriptions ? ((await q("SELECT tier FROM user_subscriptions WHERE user_id = $1 AND status = 'active'", [u.id])).rows[0]?.tier || 'free') : null });
   });
   api.get('/users/:username/posts', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT id FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL', [req.params.username]);
@@ -353,7 +359,11 @@ export function createApp() {
   });
 
   // ---------- posts ----------
-  api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, "p.kind = 'post'", [], req.query.cursor, req.query.limit)));
+  // Home feed is follow-based: me, people I follow and spaces I belong to. With no follows yet, show public posts to discover people.
+  const FEED_SCOPE = `p.kind = 'post' AND (p.author_id = $1 OR EXISTS (SELECT 1 FROM follows ff WHERE ff.follower_id = $1 AND ff.followee_id = p.author_id)
+    OR (p.space_id IS NOT NULL AND EXISTS (SELECT 1 FROM space_members sm WHERE sm.user_id = $1 AND sm.space_id = p.space_id))
+    OR NOT EXISTS (SELECT 1 FROM follows f0 WHERE f0.follower_id = $1))`;
+  api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, FEED_SCOPE, [], req.query.cursor, req.query.limit)));
   api.post('/posts', requireVerified, upload.single('image'), async (req, res) => {
     const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined, feeling: req.body?.feeling || undefined, location_tag: req.body?.location_tag || undefined, as_draft: req.body?.as_draft || undefined, enhance: req.body?.enhance || undefined });
     if (!d.body && !req.file) return res.status(400).json({ error: 'Write something or add a photo' });
@@ -550,6 +560,8 @@ export function createApp() {
   registerSocial(api, { requireAuth, requireVerified, id, pagePosts, checkPassword, BCRYPT_COST, config });
   registerReels(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility });
   registerAi(api, { requireAuth, id });
+  registerSubscriptions(api, { requireAuth, requireAdmin, id });
+  registerEngagement(api, { requireAuth, id, getVisiblePost, writeLimiter });
   registerLive(api, { requireAuth, requireVerified, requireModerator, id, notify });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
@@ -619,7 +631,8 @@ export function createApp() {
   // ---------- admin ----------
   api.get('/admin/users', requireAdmin, async (_req, res) => {
     const { rows } = await q(`SELECT u.id, u.username, u.full_name, u.email, u.phone, u.created_at, u.email_verified_at IS NOT NULL AS email_verified, u.suspended_at,
-      COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles
+      COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS roles,
+      COALESCE((SELECT us.tier FROM user_subscriptions us WHERE us.user_id = u.id), 'free') AS tier
       FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id GROUP BY u.id ORDER BY u.id LIMIT 500`);
     res.json({ items: rows });
   });

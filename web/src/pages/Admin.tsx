@@ -3,13 +3,15 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../session';
 import { AdminLive } from '../components/LiveRow';
+import { AdminPlans } from './Plans';
+import { getFeatures } from '../api';
 
 type AU = { id: number; username: string; full_name: string; email: string; roles: string[]; created_at: string };
 type Rep = { id: number; target_type: 'post' | 'user'; reason: string; status: string; resolution: string; created_at: string; post_id: number | null; post_body: string | null; post_hidden_at: string | null;
   reporter: { id: number; username: string }; target_user: { id: number; username: string; full_name: string; suspended_at: string | null } | null; reports_against_user: number };
 type St = { smtp_configured: boolean; note: string };
 export function Admin() {
-  const { me } = useSession();
+  const { me } = useSession(); const [subs, setSubs] = useState(false); useEffect(() => { getFeatures().then((f) => setSubs(!!f.subscriptions)); }, []);
   const [users, setUsers] = useState<AU[]>([]); const [status, setStatus] = useState<St | null>(null); const [err, setErr] = useState('');
   const [reports, setReports] = useState<Rep[]>([]); const [rstatus, setRstatus] = useState('open');
   const loadReports = (st = rstatus) => api<{ items: Rep[] }>(`/admin/reports?status=${st}`).then((r) => setReports(r.items)).catch((e) => setErr(e.message));
@@ -18,7 +20,7 @@ export function Admin() {
   useEffect(() => { load(); }, []);
   if (!me?.roles?.includes('admin')) return <div className="card empty">Admins only.</div>;
   const setRole = async (u: AU, role: string, on: boolean) => { try { await api(on ? `/admin/users/${u.id}/roles` : `/admin/users/${u.id}/roles/${role}`, on ? { json: { role } } : { method: 'DELETE' }); load(); } catch (e: any) { setErr(e.message); } };
-  return <div className="stack"><AdminLive />
+  return <div className="stack"><AdminLive />{subs && <AdminPlans />}
     <h1 className="pagetitle">Admin</h1>
     {err && <p className="error card">{err}</p>}
     {status && <section className="card"><h3>Email delivery</h3><p className={status.smtp_configured ? 'success' : 'notice'}>{status.note}</p></section>}
@@ -40,7 +42,7 @@ export function Admin() {
     </section>
     <section className="card"><h3>Users ({users.length})</h3>
       <div className="tablewrap"><table><thead><tr><th>User</th><th>Email</th><th>Verified</th><th>Roles</th><th></th></tr></thead><tbody>
-        {users.map((u) => <tr key={u.id}><td><Link to={`/u/${u.username}`}>@{u.username}</Link></td><td>{u.email}</td><td>{(u as any).email_verified ? '✓' : '—'}</td><td>{u.roles.join(', ') || '—'}{(u as any).suspended_at && ' · suspended'}</td>
+        {users.map((u) => <tr key={u.id}><td><Link to={`/u/${u.username}`}>@{u.username}</Link></td><td>{u.email}</td><td>{(u as any).email_verified ? '✓' : '—'}</td><td>{subs && <select aria-label={`Plan for @${u.username}`} value={(u as any).tier || 'free'} onChange={async (e) => { try { await api(`/admin/users/${u.id}/subscription`, { method: 'PUT', json: { tier: e.target.value } }); load(); } catch (x: any) { setErr(x.message); } }}><option value="free">Free</option><option value="pro">Pro</option><option value="premium">Premium</option></select>} {u.roles.join(', ') || '—'}{(u as any).suspended_at && ' · suspended'}</td>
           <td>{u.id !== me.id && (u.roles.includes('admin') ? <button className="chip" onClick={() => setRole(u, 'admin', false)}>Remove admin</button> : <button className="chip" onClick={() => confirm(`Make @${u.username} an admin?`) && setRole(u, 'admin', true)}>Make admin</button>)}</td></tr>)}
       </tbody></table></div>
     </section>

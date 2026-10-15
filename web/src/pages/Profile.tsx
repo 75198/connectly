@@ -7,6 +7,7 @@ import { Composer } from '../components/Composer';
 import { MediaStudio } from '../components/MediaStudio';
 import { PostList, usePosts } from '../components/PostList';
 import { PlacePicker } from '../components/PlacePicker';
+import { TierBadge } from './Plans';
 
 const RELATIONSHIP = ['', 'Single', 'In a relationship', 'Engaged', 'Married', 'In a civil union', 'Separated', 'Divorced', 'Widowed', "It's complicated", 'Prefer not to say'];
 
@@ -14,15 +15,9 @@ function FriendButtons({ u, onChange }: { u: User; onChange: (p: Partial<User>) 
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [menu, setMenu] = useState(false); const nav = useNavigate();
   const call = async (path: string, method: string, patch?: (r: any) => Partial<User>) => { setBusy(true); setErr(''); try { const r = await api(path, { method }); if (patch) onChange(patch(r)); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const n = encodeURIComponent(u.username);
-  const fs = u.friend_status;
   return <div className="stack pad">
     <div className="row wrap">
-      {fs === 'none' && <button className="btn primary" disabled={busy} onClick={() => call(`/friends/${n}`, 'POST', (r) => ({ friend_status: r.friend_status }))}>Add friend</button>}
-      {fs === 'outgoing' && <button className="btn ghost" disabled={busy} onClick={() => call(`/friends/${n}`, 'DELETE', () => ({ friend_status: 'none' }))}>Cancel request</button>}
-      {fs === 'incoming' && <><button className="btn primary" disabled={busy} onClick={() => call(`/friends/${n}/accept`, 'POST', () => ({ friend_status: 'friends', friend_count: (u.friend_count || 0) + 1 }))}>Accept request</button>
-        <button className="btn ghost" disabled={busy} onClick={() => call(`/friends/${n}/reject`, 'POST', () => ({ friend_status: 'none' }))}>Decline</button></>}
-      {fs === 'friends' && <button className="btn ghost" disabled={busy} onClick={() => confirm(`Remove ${u.full_name} from your friends?`) && call(`/friends/${n}`, 'DELETE', () => ({ friend_status: 'none', friend_count: Math.max(0, (u.friend_count || 1) - 1) }))}>✓ Friends</button>}
-      <button className="btn ghost" disabled={busy} onClick={() => call(`/users/${n}/follow`, u.following ? 'DELETE' : 'PUT', (r) => ({ following: r.following, follower_count: (u.follower_count || 0) + (r.following ? 1 : -1) }))}>{u.following ? 'Following' : 'Follow'}</button>
+      <button className={`btn ${u.following ? 'ghost' : 'primary'} grow`} disabled={busy} aria-pressed={!!u.following} onClick={() => call(`/users/${n}/follow`, u.following ? 'DELETE' : 'PUT', (r) => ({ following: r.following, follower_count: r.follower_count ?? (u.follower_count || 0) + (r.following ? 1 : -1) }))}>{u.following ? '✓ Following' : u.follows_me ? 'Follow back' : 'Follow'}</button>
       <button className="btn icon ghost" aria-label="More options" onClick={() => setMenu(true)}><Icon name="more" /></button>
     </div>
     {err && <p className="error">{err}</p>}
@@ -46,9 +41,9 @@ export function Profile() {
       <div className="cover" style={u.cover_path ? { backgroundImage: `url(${u.cover_path})` } : undefined} />
       <div className="pinfo">
         <div className="pav"><Avatar user={u} size={112} /></div>
-        <h1>{u.full_name}</h1><div className="meta">@{u.username}{u.location ? ` · 📍 ${u.location}` : ''}</div>
+        <h1>{u.full_name} <TierBadge tier={u.tier} /></h1><div className="meta">@{u.username}{u.location ? ` · 📍 ${u.location}` : ''}</div>
         {u.bio && <p className="pbiotext">{u.bio}</p>}
-        <div className="pstats"><span><b>{u.post_count ?? 0}</b><small>Posts</small></span><Link to={u.is_me ? '/friends' : '#'}><b>{u.friend_count ?? 0}</b><small>Friends</small></Link><span><b>{u.follower_count ?? 0}</b><small>Followers</small></span></div>
+        <div className="pstats"><span><b>{u.post_count ?? 0}</b><small>Posts</small></span><Link to={`/u/${u.username}/followers`}><b>{u.follower_count ?? 0}</b><small>Followers</small></Link><Link to={`/u/${u.username}/following`}><b>{u.following_count ?? 0}</b><small>Following</small></Link></div>
         {u.is_me ? <div className="row pactions"><Link className="btn primary grow" to="/settings/profile"><Icon name="gear" /> Edit profile</Link><Link className="btn ghost" to="/me/saved" aria-label="Saved"><Icon name="bookmark" /></Link></div>
           : <div className="pactions"><FriendButtons u={u} onChange={(p) => setU({ ...u, ...p })} /></div>}
       </div>

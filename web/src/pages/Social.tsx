@@ -4,6 +4,7 @@ import { api, Post, postTime } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon, ListSkeleton } from '../components/ui';
 import { PostCard } from '../components/PostCard';
+import { FollowButton } from '../components/Engagement';
 
 type N = { id: number; type: string; post_id: number | null; created_at: string; read_at: string | null; actor: { username: string; full_name: string; avatar_path: string | null }; post_snippet: string | null; space: { slug: string; name: string; kind: string } | null; live_stream_id?: number | null };
 const TEXT: Record<string, (n: N) => string> = {
@@ -44,21 +45,19 @@ export function Notifications() {
   </div>;
 }
 
-type Mini = { id: number; username: string; full_name: string; avatar_path: string | null };
+type FPerson = { id: number; username: string; full_name: string; avatar_path: string | null; bio?: string; following: boolean; is_me: boolean };
+// Followers / Following lists (replaces friend requests). /friends shows your own.
 export function Friends() {
-  const [tab, setTab] = useState<'friends' | 'incoming' | 'outgoing'>('incoming'); const [items, setItems] = useState<Mini[] | null>(null); const [err, setErr] = useState('');
-  const load = () => api<{ items: Mini[] }>(`/friends?type=${tab}`).then((r) => setItems(r.items)).catch((e) => setErr(e.message));
-  useEffect(() => { setItems(null); load(); }, [tab]); // eslint-disable-line
-  const act = async (path: string, method: string) => { setErr(''); try { await api(path, { method }); await load(); } catch (e: any) { setErr(e.message); } };
-  return <div className="stack"><h1 className="pagetitle">Friends</h1>
-    <div className="tabs card">{([['incoming', 'Requests'], ['friends', 'Your friends'], ['outgoing', 'Sent']] as const).map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
+  const { me } = useSession(); const p = useParams(); const nav = useNavigate();
+  const username = p.username || me?.username || ''; const tab: 'followers' | 'following' = p.list === 'following' ? 'following' : 'followers';
+  const [items, setItems] = useState<FPerson[] | null>(null); const [err, setErr] = useState('');
+  useEffect(() => { if (!username) return; setItems(null); setErr(''); api<{ items: FPerson[] }>(`/users/${encodeURIComponent(username)}/${tab}`).then((r) => setItems(r.items)).catch((e) => setErr(e.message)); }, [username, tab]);
+  return <div className="stack"><h1 className="pagetitle">{username === me?.username ? 'Your people' : `@${username}`}</h1>
+    <div className="tabs card">{(['followers', 'following'] as const).map((k) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => nav(`/u/${username}/${k}`, { replace: true })}>{k === 'followers' ? 'Followers' : 'Following'}</button>)}</div>
     {err && <p className="error card">{err}</p>}
-    {!items ? <div className="spinner" /> : items.length === 0 ? <p className="card empty">{tab === 'incoming' ? 'No friend requests right now.' : tab === 'friends' ? 'No friends yet. Use Search to find people.' : 'No pending requests.'}</p>
-      : <div className="card list">{items.map((u) => { const n = encodeURIComponent(u.username); return <div key={u.id} className="hubrow"><Link to={`/u/${u.username}`} className="person grow"><Avatar user={u} size={44} /><span><b>{u.full_name}</b><small className="meta">@{u.username}</small></span></Link>
-        {tab === 'incoming' && <><button className="chip primary" onClick={() => act(`/friends/${n}/accept`, 'POST')}>Accept</button><button className="chip" onClick={() => act(`/friends/${n}/reject`, 'POST')}>Decline</button></>}
-        {tab === 'outgoing' && <button className="chip" onClick={() => act(`/friends/${n}`, 'DELETE')}>Cancel</button>}
-        {tab === 'friends' && <button className="chip" onClick={() => confirm(`Remove ${u.full_name}?`) && act(`/friends/${n}`, 'DELETE')}>Remove</button>}
-      </div>; })}</div>}
+    {!items ? <ListSkeleton n={5} /> : items.length === 0 ? <p className="card empty">{tab === 'followers' ? 'No followers yet.' : 'Not following anyone yet. Use Search to find people.'}</p>
+      : <div className="card list">{items.map((u) => <div key={u.id} className="hubrow"><Link to={`/u/${u.username}`} className="person grow"><Avatar user={u} size={44} /><span><b>{u.full_name}</b><small className="meta">@{u.username}</small></span></Link>
+        {!u.is_me && <FollowButton username={u.username} following={u.following} small />}</div>)}</div>}
   </div>;
 }
 

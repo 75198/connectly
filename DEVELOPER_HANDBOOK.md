@@ -62,6 +62,7 @@ Flags live in `server/config.js` → `config.features` and are read from env var
 | `FEATURE_REELS` | 1 | Reels API (`/api/reels*`) and the Reels entries in the Home header, sidebar and Create menu |
 | `FEATURE_AI_SUPPORT` | 0 | Connectly AI AI support chat (`/api/ai/*`, `/assistant`, entries in Profile hub and Search) |
 | `FEATURE_LIVE` | 0 | Go Live video (`/api/live*`, `/live/new`, `/live/:id`, Create menu chip, Home live row, story rings) |
+| `FEATURE_SUBSCRIPTIONS` | 0 | Free / Connectly Pro / Connectly Premium tiers, Settings › Subscription and Upgrade, admin plan + tier controls |
 | `FEATURE_WELCOME_HERO` | 1 | Animated video landing screen at `/` for logged-out visitors (off: `/` goes straight to Log in) |
 Flags the client needs are exposed read-only in `GET /api/auth/capabilities` → `features`.
 Other tunables: `POW_BITS` (default 17, about 1-3 s in a phone browser; raise it if bots get through).
@@ -145,3 +146,19 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - `web/src/lib/permission.tsx`: `askPermission(kind)` shows a branded sheet (logo, "Allow Connectly to use your camera", one-line reason, Allow / Not now) before any camera, microphone, location, contacts or notification prompt. The browser prompt fires only after Allow. If the Permissions API already says `denied`, or the API throws `NotAllowedError`, `showPermissionDenied(kind)` shows steps for turning it back on in iPhone and Android settings. Already-granted permissions skip the sheet.
 - Used by the onboarding steps (notifications, location, contacts), `MediaStudio` (camera) and Go Live (camera + mic). Any new permission request must go through `askPermission`.
 - PWA manifest `name` / `short_name` and the page `<title>` are all "Connectly".
+
+## 16. Follow model, engagement lists, messaging limits (round 6, migration 013)
+- **Follows replace friend requests.** One tap: `PUT|DELETE /users/:username/follow` (returns `follower_count`). Lists: `GET /users/:username/followers|following`. The profile shows Followers and Following counts, and the UI is at `/u/:username/followers|following` (`/friends` shows your own). `friendships` is kept untouched and the old `/friends*` endpoints still work, but the UI no longer uses them.
+- Migration 013 copied relationships additively: accepted friendships became follows in both directions, and pending requests became a follow from the requester (`ON CONFLICT DO NOTHING`).
+- The "Friends" audience now means accepted friendship OR mutual follow. Existing friends keep access, and a one-way follower does not gain access to friends-only posts.
+- Home feed: your posts, people you follow, and spaces you belong to. If you follow nobody yet, it shows public posts for discovery.
+- Safety limit: `FOLLOW_DAILY_LIMIT` (default 500 new follows per rolling 24 h) returns 429 "You’ve followed a lot of people today. Take a rest and try again tomorrow."
+- `server/engagement.js`: `GET /posts/:id/reactions|commenters|shares` (visibility-checked, blocked people hidden). `POST /posts/:id/share {channel}` tracks shares in the existing `shares` table (new `channel` column), and posts expose `share_count`. Tapping the counts on posts and reels opens `components/Engagement.tsx`.
+- Messaging: there are no user-to-user DMs yet. Comments and live comments have no daily caps, only burst limits (60 writes/min per IP, 20 live comments/min). Future messaging must use per-minute burst limits only. Connectly AI keeps its per-tier hourly and global daily limits.
+
+## 17. Subscriptions (round 6, migration 014)
+- Tables: `plans` (free/pro/premium; placeholder `price_minor` + `currency` editable by admins; `ai_hourly`; `perks` JSON: badge, reel_seconds, story_extras), `user_subscriptions` (tier per user, default free), `subscription_events` (audit).
+- **Never show numeric limits or remaining counts to users.** User-facing plan APIs omit `ai_hourly`. Hitting the Connectly AI limit returns a friendly 429 ("You've reached your Connectly AI limit for now. Try again later or upgrade to Connectly Pro.") with `upgrade: true`, and the chat shows an Upgrade button. The Live UI also shows no numbers ("Ending soon", "This live is full right now").
+- Screens: Settings › Subscription (`/settings/subscription`), Upgrade (`/settings/plans`), and a profile PRO/PREMIUM badge. Admin: a plan editor (name, price, currency, AI per hour) and a tier dropdown per user (`PUT /admin/users/:id/subscription`).
+- Payments are pluggable (`server/payments/index.js`). The planned providers are **App Store** and **Google Play** in-app purchases for the store apps, plus an optional web card processor. Nothing charges yet: checkout returns 503 "Upgrades are coming soon." until a provider's credentials are set **and** `PAYMENTS_LIVE=1`.
+- Perks hooks: `perks.reel_seconds` and `story_extras` are stored for the upcoming longer-reels and story features. Today only the badge and the AI allowance are enforced.

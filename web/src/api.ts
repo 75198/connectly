@@ -1,12 +1,12 @@
 export type User = { hometown?: string; interests?: string[]; relationship_status?: string; work_company?: string; work_role?: string; education?: string; current_place_id?: number | null; hometown_place_id?: number | null;
-  friend_status?: 'none' | 'outgoing' | 'incoming' | 'friends'; following?: boolean; follower_count?: number; friend_count?: number;
+  friend_status?: 'none' | 'outgoing' | 'incoming' | 'friends'; following?: boolean; follower_count?: number; following_count?: number; follows_me?: boolean; tier?: string | null; friend_count?: number;
   email_notifications?: boolean; inapp_notifications?: boolean; default_post_visibility?: 'public' | 'friends' | 'private'; theme_pref?: 'light' | 'dark' | 'system'; profile_details_visibility?: 'public' | 'friends' | 'private';
   acting_as?: { id: number; slug: string; name: string; photo_path: string | null } | null; unread_notifications?: number; id: number; username: string; full_name: string; bio: string; location: string; avatar_path: string | null; cover_path: string | null; created_at?: string; email?: string | null; phone?: string | null; email_verified?: boolean; onboarded?: boolean; roles?: string[]; post_count?: number; is_me?: boolean };
 export type Author = { id: number; username: string; full_name: string; avatar_path: string | null; space?: boolean; kind?: string };
 export const authorHref = (a: Author) => (a.space ? `/s/${a.username}` : `/u/${a.username}`);
 export type Post = { id: number; body: string; image_path: string | null; visibility: 'public' | 'friends' | 'private'; created_at: string; updated_at: string; author: Author; is_mine: boolean; space: { slug: string; name: string; kind: string } | null; like_count: number; comment_count: number; liked_by_me: boolean;
   kind?: 'post' | 'reel'; video_path?: string | null; video_low_path?: string | null; poster_path?: string | null; video_seconds?: number | null; view_count?: number;
-  feeling?: string; location_tag?: string; is_draft?: boolean; deleted_at?: string | null; my_reaction?: Reaction | null; reactions?: Partial<Record<Reaction, number>>; saved_by_me?: boolean };
+  feeling?: string; location_tag?: string; is_draft?: boolean; deleted_at?: string | null; my_reaction?: Reaction | null; reactions?: Partial<Record<Reaction, number>>; saved_by_me?: boolean; share_count?: number };
 export type Comment = { id: number; post_id: number; parent_id: number | null; body: string; created_at: string; author: Author; is_mine?: boolean };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
@@ -46,7 +46,7 @@ export function deviceName(ua: string | null) {
 }
 
 // Public feature flags (server: config.features). Cached for the page lifetime.
-export type Features = { reels: boolean; welcome_hero: boolean; ai_support?: boolean; live?: boolean };
+export type Features = { reels: boolean; welcome_hero: boolean; ai_support?: boolean; live?: boolean; subscriptions?: boolean };
 let featuresP: Promise<Features> | null = null;
 export function getFeatures(): Promise<Features> {
   if (!featuresP) featuresP = api<{ features?: Features }>('/auth/capabilities').then((c) => c.features || { reels: false, welcome_hero: false }).catch(() => { featuresP = null; return { reels: false, welcome_hero: false }; });

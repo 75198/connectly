@@ -40,6 +40,8 @@ const MyPosts = lazy(() => import('./pages/MyPosts').then((m) => ({ default: m.M
 const Assistant = lazy(() => import('./pages/Assistant').then((m) => ({ default: m.Assistant })));
 const GoLive = lazy(() => import('./pages/Live').then((m) => ({ default: m.GoLive })));
 const WatchLive = lazy(() => import('./pages/Live').then((m) => ({ default: m.WatchLive })));
+const PlansPage = lazy(() => import('./pages/Plans').then((m) => ({ default: m.PlansPage })));
+const ManageSubscription = lazy(() => import('./pages/Plans').then((m) => ({ default: m.ManageSubscription })));
 const Search = lazy(() => import('./pages/Search').then((m) => ({ default: m.Search })));
 
 function AiLink() {
@@ -78,8 +80,8 @@ function Router() {
     {legal}
     <Route path="/" element={<Feed />} /><Route path="/compose" element={<Compose />} /><Route path="/search" element={<Search />} /><Route path="/reels/new" element={<NewReel />} />
     <Route path="/u/:username" element={<Profile />} /><Route path="/settings" element={<Settings />} />
-    <Route path="/settings/profile" element={<EditProfile />} /><Route path="/settings/:section" element={<SettingsSection />} />
-    <Route path="/me" element={<Hub />} /><Route path="/me/:tab" element={<MyPosts />} /><Route path="/notifications" element={<Notifications />} /><Route path="/friends" element={<Friends />} />
+    <Route path="/settings/profile" element={<EditProfile />} /><Route path="/settings/plans" element={<PlansPage />} /><Route path="/settings/subscription" element={<ManageSubscription />} /><Route path="/settings/:section" element={<SettingsSection />} />
+    <Route path="/me" element={<Hub />} /><Route path="/me/:tab" element={<MyPosts />} /><Route path="/notifications" element={<Notifications />} /><Route path="/friends" element={<Friends />} /><Route path="/u/:username/:list" element={<Friends />} />
     <Route path="/post/:id" element={<PostPage />} /><Route path="/create/:kind" element={<CreateSpace />} /><Route path="/s/:slug" element={<SpaceView />} />
     <Route path="/market" element={<Market />} /><Route path="/market/new" element={<NewListing />} /><Route path="/market/:id" element={<ListingView />} />
     {me.roles?.includes('admin') && <Route path="/admin" element={<Admin />} />}

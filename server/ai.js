@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { q } from './db.js';
 import { config } from './config.js';
+import { aiHourlyFor, tierOf } from './subscriptions.js';
 
 export const SYSTEM_PROMPT = `You are Connectly AI, the friendly built-in assistant in Connectly, a social app (like Meta AI).
 You can help with anything: general knowledge, explanations, homework and study help (explain the steps, don't just hand over answers for graded work), writing captions, posts, bios and messages, ideas, translation, recipes, planning, everyday advice, and of course help using Connectly.
@@ -20,7 +21,8 @@ Rules:
 - If you are unsure, say so rather than inventing facts.`;
 
 export const FALLBACK = "Connectly AI is taking a short break right now. Please try again in a little while. Quick help: reset your password from Log in > \"Forgot password?\", change privacy in Profile > Privacy and settings, and for anything serious use the ⋯ menu > Report so an admin can help.";
-const USER_LIMIT_MSG = "You've sent a lot of messages this hour 🙂 Please take a breather and try again a bit later.";
+const USER_LIMIT_MSG = "You've reached your Connectly AI limit for now. Try again later.";
+const UPGRADE_MSG = { free: "You've reached your Connectly AI limit for now. Try again later or upgrade to Connectly Pro.", pro: "You've reached your Connectly AI limit for now. Try again later or upgrade to Connectly Premium." };
 const DAILY_LIMIT_MSG = "Connectly AI has been really busy today and reached its daily limit. Please try again tomorrow. For urgent problems, use the ⋯ menu > Report.";
 
 const Chat = z.object({ conversation_id: z.coerce.number().int().positive().optional(), message: z.string().trim().min(1, 'Type a message').max(2000, 'Message is too long (2000 characters max)') }).strict();
@@ -54,7 +56,11 @@ async function overLimit(uid) {
   const { rows: [lim] } = await q(`SELECT
       (SELECT count(*) FROM ai_messages WHERE role = 'user' AND user_id = $1 AND created_at > now() - interval '1 hour')::int AS mine,
       (SELECT count(*) FROM ai_messages WHERE role = 'user' AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::int AS today`, [uid]);
-  if (lim.mine >= config.aiUserHourly) return { error: USER_LIMIT_MSG, limit: 'user' };
+  if (lim.mine >= await aiHourlyFor(uid)) {
+    const tier = await tierOf(uid);
+    const up = config.features.subscriptions && UPGRADE_MSG[tier];
+    return { error: up || USER_LIMIT_MSG, limit: 'user', ...(up ? { upgrade: true } : {}) };
+  }
   if (lim.today >= config.aiDailyCap) return { error: DAILY_LIMIT_MSG, limit: 'daily' };
   return null;
 }
@@ -67,7 +73,7 @@ export function registerAi(api, { requireAuth, id }) {
     return rows[0];
   };
 
-  api.get('/ai/status', requireAuth, enabled, (_req, res) => res.json({ enabled: true, available: !!config.groqApiKey, hourly_limit: config.aiUserHourly }));
+  api.get('/ai/status', requireAuth, enabled, (_req, res) => res.json({ enabled: true, available: !!config.groqApiKey }));
 
   api.get('/ai/conversations', requireAuth, enabled, async (req, res) => {
     const { rows } = await q(`SELECT c.id, c.title, c.updated_at, (SELECT left(content, 120) FROM ai_messages m WHERE m.conversation_id = c.id ORDER BY id DESC LIMIT 1) AS last

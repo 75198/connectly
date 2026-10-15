@@ -62,7 +62,7 @@ export function registerLive(api, { requireAuth, requireVerified, requireModerat
 
   api.get('/live/status', requireAuth, on, async (_req, res) => {
     const used = await monthlyMinutes();
-    res.json({ configured: liveConfigured(), max_minutes: config.liveMaxMinutes, max_viewers: config.liveMaxViewers, month_remaining: Math.max(0, Math.floor(config.liveMonthlyMinutes - used)), reactions: LIVE_REACTIONS });
+    res.json({ configured: liveConfigured(), available: used < config.liveMonthlyMinutes, reactions: LIVE_REACTIONS });
   });
 
   api.get('/live', requireAuth, on, async (req, res) => {
@@ -103,7 +103,7 @@ export function registerLive(api, { requireAuth, requireVerified, requireModerat
     const raw = (await q('SELECT room, ends_by FROM live_streams WHERE id = $1', [sid])).rows[0];
     if (s.is_mine) return res.json({ stream: s, ...(await tokenFor(raw, req.user, true)) });
     const already = (await q('SELECT 1 FROM live_participants WHERE stream_id = $1 AND user_id = $2 AND left_at IS NULL AND last_seen > now() - interval \'40 seconds\'', [sid, req.user.id])).rowCount;
-    if (!already && s.viewer_count >= config.liveMaxViewers) return res.status(429).json({ error: `This live is full right now (${config.liveMaxViewers} viewers max). Try again in a bit.`, limit: 'viewers' });
+    if (!already && s.viewer_count >= config.liveMaxViewers) return res.status(429).json({ error: 'This live is full right now. Try again in a bit.', limit: 'viewers' });
     if (await monthlyMinutes() >= config.liveMonthlyMinutes) return res.status(429).json({ error: MONTH_LIMIT_MSG, limit: 'monthly' });
     await q(`INSERT INTO live_participants (stream_id, user_id) VALUES ($1, $2)
       ON CONFLICT (stream_id, user_id) DO UPDATE SET left_at = NULL, last_seen = now()`, [sid, req.user.id]);

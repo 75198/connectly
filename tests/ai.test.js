@@ -97,7 +97,7 @@ test('per-user hourly limit and global daily cap', async () => {
   // A has 2 messages; limit 3
   assert.equal((await chat(A, { message: 'third' })).status, 200);
   const r = await A.post('/api/ai/chat').set(H).send({ message: 'fourth' });
-  assert.equal(r.status, 429); assert.equal(r.body.limit, 'user'); assert.match(r.body.error, /try again/);
+  assert.equal(r.status, 429); assert.equal(r.body.limit, 'user'); assert.match(r.body.error, /Try again later/);
   // daily total now 3 (A) + 1 (B, down) = 4; cap 5
   assert.equal((await chat(B, { message: 'one' })).status, 200);
   const d = await B.post('/api/ai/chat').set(H).send({ message: 'two' });

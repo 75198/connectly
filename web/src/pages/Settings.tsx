@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, deviceName, timeAgo } from '../api';
+import { api, deviceName, getFeatures, timeAgo } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon } from '../components/ui';
 import { IdentifierInput } from '../components/Identifier';
@@ -13,10 +13,16 @@ const SECTIONS: [string, string, Parameters<typeof Icon>[0]['name']][] = [
 ];
 const Back = ({ title }: { title: string }) => <div className="row"><Link to="/settings" className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">{title}</h1></div>;
 
+function SubsLink() {
+  const [on, setOn] = useState(false); useEffect(() => { getFeatures().then((f) => setOn(!!f.subscriptions)); }, []);
+  if (!on) return null;
+  return <div className="card list"><Link to="/settings/subscription"><Icon name="shield" /> <span className="grow">Subscription</span><Icon name="chev" /></Link><Link to="/settings/plans"><span className="aiorb xs">✦</span> <span className="grow"><b>Upgrade to Connectly Pro</b></span><Icon name="chev" /></Link></div>;
+}
 export function Settings() {
   const { themePref, setThemePref } = useSession();
   return <div className="stack">
     <div className="row"><Link to="/me" className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">Privacy and settings</h1></div>
+    <SubsLink />
     <section className="card"><h3>Appearance</h3>
       <div className="segmented" role="radiogroup" aria-label="Theme">{([['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'gear']] as const).map(([k, l, ic]) =>
         <button key={k} role="radio" aria-checked={themePref === k} className={themePref === k ? 'on' : ''} onClick={() => setThemePref(k)}><Icon name={ic} /> {l}</button>)}</div>

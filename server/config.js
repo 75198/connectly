@@ -21,6 +21,7 @@ export const config = {
     reels: (env.FEATURE_REELS ?? '1') !== '0',
     welcomeHero: (env.FEATURE_WELCOME_HERO ?? '1') !== '0',
     live: (env.FEATURE_LIVE ?? '0') === '1',
+    subscriptions: (env.FEATURE_SUBSCRIPTIONS ?? '0') === '1',
     aiSupport: (env.FEATURE_AI_SUPPORT ?? '0') === '1',
   },
   powBits: Number(env.POW_BITS || (isTest ? 4 : 17)),
@@ -33,6 +34,12 @@ export const config = {
   groqApiKey: env.GROQ_API_KEY || '',
   groqBaseUrl: env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
   groqModel: env.GROQ_MODEL || 'openai/gpt-oss-20b',
+  // Payments (pluggable; nothing charges yet). See server/payments/index.js.
+  paymentsLive: env.PAYMENTS_LIVE === '1',
+  appStoreIssuerId: env.APPSTORE_ISSUER_ID || '', appStoreKeyId: env.APPSTORE_KEY_ID || '', appStoreBundleId: env.APPSTORE_BUNDLE_ID || '',
+  googlePlayPackage: env.GOOGLE_PLAY_PACKAGE || '', googlePlayServiceAccount: env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '',
+  webPaymentsEnabled: env.WEB_PAYMENTS_ENABLED === '1', webPaymentsSecret: env.WEB_PAYMENTS_SECRET_KEY || '',
+  followDailyLimit: Number(env.FOLLOW_DAILY_LIMIT || 500),
   aiUserHourly: Number(env.AI_USER_HOURLY || 30),
   aiDailyCap: Number(env.AI_DAILY_CAP || 900),
   // Go Live (LiveKit Cloud free tier: 5,000 participant-minutes/month). Secrets only in .env.

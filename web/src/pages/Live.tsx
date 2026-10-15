@@ -63,7 +63,7 @@ export function GoLive() {
   const [facing, setFacing] = useState<'user' | 'environment'>('user'); const [muted, setMuted] = useState(false); const [camOff, setCamOff] = useState(false);
   const [title, setTitle] = useState(''); const [stream, setStream] = useState<LiveStream | null>(null); const [room, setRoom] = useState<Room | null>(null);
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [now, setNow] = useState(Date.now());
-  const [status, setStatus] = useState<{ configured: boolean; max_minutes: number; max_viewers: number; month_remaining: number } | null>(null);
+  const [status, setStatus] = useState<{ configured: boolean; available: boolean } | null>(null);
   const ended = () => { toast('Your live video has ended'); stop(); nav('/'); };
   const ev = useLiveEvents(stream?.id ?? null, ended);
   useEffect(() => { api('/live/status').then(setStatus).catch(() => {}); }, []);
@@ -99,7 +99,7 @@ export function GoLive() {
     <video ref={videoRef} className={`livevideo${facing === 'user' ? ' mirror' : ''}`} autoPlay playsInline muted />
     <header className="livetop">
       <button className="btn icon liveglass" aria-label="Close" onClick={() => (stream ? end() : (stop(), nav(-1)))}><Icon name="x" /></button>
-      {stream ? <><span className="livebadge">LIVE</span><span className="liveglass pill">{clock(now - new Date(stream.started_at).getTime())}</span>{left < 5 * 60000 && <span className="liveglass pill warn">{clock(left)} left</span>}</> : <b className="liveglass pill">Go Live</b>}
+      {stream ? <><span className="livebadge">LIVE</span><span className="liveglass pill">{clock(now - new Date(stream.started_at).getTime())}</span>{left < 5 * 60000 && <span className="liveglass pill warn">Ending soon</span>}</> : <b className="liveglass pill">Go Live</b>}
       <span className="grow" />
       <button className="btn icon liveglass" aria-label="Switch camera" onClick={flip}>🔄</button>
       <button className="btn icon liveglass" aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} onClick={toggleMute}><Icon name={muted ? 'mute' : 'volume'} /></button>
@@ -108,7 +108,7 @@ export function GoLive() {
     {!stream ? <div className="livesetup">
       {me && <div className="row"><Avatar user={me} size={40} /><b>{me.full_name}</b></div>}
       <input className="livetitle" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="Add a title (optional)" aria-label="Live title" />
-      <p className="liveinfo">Your friends and followers will be notified. Up to {status?.max_minutes ?? 60} min and {status?.max_viewers ?? 20} viewers per live.</p>
+      <p className="liveinfo">Your followers will be notified when you go live.</p>
       {status && !status.configured && <p className="liveerr">Live video isn’t set up yet. Please try again later.</p>}
       {err && <p className="liveerr">{err}</p>}
       <button className="btn livego" disabled={busy || !tracks.v || status?.configured === false} onClick={start}>{busy ? 'Starting…' : 'Go Live'}</button>
@@ -146,10 +146,13 @@ export function WatchLive() {
     })();
     return () => { gone = true; rm?.disconnect(); api(`/live/${id}/leave`, { method: 'POST' }).catch(() => {}); };
   }, [id]);
+  const [hearts, setHearts] = useState<{ k: number; x: number; y: number }[]>([]); const lastTap = useRef(0);
+  const tap = (ev: React.PointerEvent) => { const now = Date.now(); if (now - lastTap.current < 300 && stream && !over) { const k = now; setHearts((h) => [...h, { k, x: ev.clientX, y: ev.clientY }]); setTimeout(() => setHearts((h) => h.filter((x) => x.k !== k)), 900); react('❤️'); } lastTap.current = now; };
   const react = (e: string) => { ev.addFloater(e); api(`/live/${id}/reactions`, { json: { reaction: e } }).catch((x) => toast(x.message, 'err')); };
   const report = async () => { const reason = prompt('What’s wrong with this live video?'); if (!reason) return; try { const r = await api<{ message: string }>(`/live/${id}/report`, { json: { reason } }); toast(r.message); } catch (e: any) { toast(e.message, 'err'); } setReportOpen(false); };
   return <div className="livescreen">
-    <video ref={videoRef} className="livevideo" autoPlay playsInline muted={false} />
+    <video ref={videoRef} className="livevideo" autoPlay playsInline muted={false} onPointerUp={tap} />
+    {hearts.map((h) => <span key={h.k} className="liveheart" style={{ left: h.x, top: h.y }}>❤️</span>)}
     <audio ref={audioRef} autoPlay />
     {!hasVideo && !over && !err && <div className="livewait">{stream ? <><Avatar user={stream.host} size={84} /><p>Connecting to {stream.host.full_name}…</p></> : <p>Loading…</p>}</div>}
     <header className="livetop">
