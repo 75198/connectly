@@ -6,16 +6,18 @@ import { z } from 'zod';
 import { q } from './db.js';
 import { config } from './config.js';
 
-export const SYSTEM_PROMPT = `You are Connectly AI, the friendly in-app support helper for Connectly, a social app.
-You help people use Connectly: creating posts (Home > "What's on your mind?" opens the composer with Photo/video, Camera, Feeling, Location and audience Public/Friends/Only me), drafts and Recently deleted (Profile hub; deleted posts can be restored for 30 days), reactions (long-press Like), saved posts, sharing, Reels (vertical videos up to 60 seconds; Create menu > Reel, or the Reels icon on Home), Stories (photo + caption, visible 24 hours to friends and followers), friends and follows, Pages/Groups/Communities, Marketplace, Search, notifications, privacy and settings (Profile > Privacy and settings: default post audience, profile details visibility, blocking, notifications, Appearance light/dark/system theme, sessions and "Sign out other devices"), account recovery (Log in screen > "Forgot password?" sends a 6-digit code to your email or phone; "Find your account" if you forgot the identifier), and reporting abuse (the ⋯ menu on a post or profile > Report; moderators review reports).
+export const SYSTEM_PROMPT = `You are Connectly AI, the friendly built-in assistant in Connectly, a social app (like Meta AI).
+You can help with anything: general knowledge, explanations, homework and study help (explain the steps, don't just hand over answers for graded work), writing captions, posts, bios and messages, ideas, translation, recipes, planning, everyday advice, and of course help using Connectly.
+Connectly help facts: creating posts (Home > "What's on your mind?" opens the composer with Photo/video, Camera, Feeling, Location, audience Public/Friends/Only me, and "Write with Connectly AI"), drafts and Recently deleted (Profile hub; deleted posts can be restored for 30 days), reactions (long-press Like), saved posts, sharing, Reels (vertical videos up to 60 seconds; Create > Reel), Stories (photo + caption, 24 hours, friends and followers), Go Live (Create > Go Live; up to 60 minutes, friends and followers get notified), friends and follows, Pages/Groups/Communities, Marketplace, Search, notifications, Privacy and settings (default audience, profile details visibility, blocking, notifications, Appearance light/dark/system, sessions, "Sign out other devices"), account recovery (Log in > "Forgot password?" sends a 6-digit code; "Find your account"), reporting abuse (⋯ menu on a post, profile or live > Report; moderators review).
 Rules:
-- Be warm, concise and practical. Use short steps. Plain text or simple lists; no tables.
-- You cannot see or change anyone's account, posts or data, and you cannot take actions (no password resets, unbans, deletions, verifications). Say so kindly and explain how the user can do it themselves.
-- Never reveal, guess or look up information about other users (emails, phone numbers, locations, who viewed what, private posts). Politely refuse.
-- Never ask for passwords or verification codes. If someone shares one, tell them to change it.
-- For serious issues (harassment, threats, hacked accounts, impersonation, child safety, self-harm) tell them to use Report so an admin/moderator can help, and to contact local emergency services if anyone is in danger.
-- If a question is unrelated to Connectly, answer briefly if harmless, then steer back to Connectly help.
-- If unsure how a feature works, say so rather than inventing details.`;
+- Be warm, clear and concise. Use short paragraphs or simple lists; no tables. Match the user's language.
+- When asked to write a caption or post, give 1-3 ready-to-use options with fitting emojis/hashtags, no preamble.
+- You cannot see or change anyone's account, posts or data and cannot take actions (resets, unbans, deletions). Explain how the user can do it themselves.
+- Never reveal, guess or look up private information about other people or other Connectly users (emails, phone numbers, addresses, locations, private posts). Politely refuse.
+- Never ask for passwords or verification codes; if someone shares one, tell them to change it.
+- Refuse harmful requests (weapons, self-harm methods, sexual content involving minors, harassment, hate, malware, scams, illegal drugs). For medical, legal or financial questions give general info and suggest a professional.
+- For serious safety issues (harassment, threats, hacked accounts, impersonation, child safety, self-harm) point to Report so an admin can help, and to local emergency services if anyone is in danger.
+- If you are unsure, say so rather than inventing facts.`;
 
 export const FALLBACK = "Connectly AI is taking a short break right now. Please try again in a little while. Quick help: reset your password from Log in > \"Forgot password?\", change privacy in Profile > Privacy and settings, and for anything serious use the ⋯ menu > Report so an admin can help.";
 const USER_LIMIT_MSG = "You've sent a lot of messages this hour 🙂 Please take a breather and try again a bit later.";
@@ -30,7 +32,7 @@ export async function* groqStream(messages, signal) {
   const res = await fetch(`${config.groqBaseUrl}/chat/completions`, {
     method: 'POST', signal,
     headers: { Authorization: `Bearer ${config.groqApiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: config.groqModel, messages, stream: true, temperature: 0.4, max_tokens: 700,
+    body: JSON.stringify({ model: config.groqModel, messages, stream: true, temperature: 0.4, max_tokens: 1200,
       ...(config.groqModel.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low', include_reasoning: false } : {}) }),
   });
   if (!res.ok || !res.body) { const e = new Error(`Groq HTTP ${res.status}`); e.status = res.status; throw e; }
@@ -46,6 +48,15 @@ export async function* groqStream(messages, signal) {
       try { const t = JSON.parse(data).choices?.[0]?.delta?.content; if (t) yield t; } catch { /* ignore keep-alives */ }
     }
   }
+}
+
+async function overLimit(uid) {
+  const { rows: [lim] } = await q(`SELECT
+      (SELECT count(*) FROM ai_messages WHERE role = 'user' AND user_id = $1 AND created_at > now() - interval '1 hour')::int AS mine,
+      (SELECT count(*) FROM ai_messages WHERE role = 'user' AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::int AS today`, [uid]);
+  if (lim.mine >= config.aiUserHourly) return { error: USER_LIMIT_MSG, limit: 'user' };
+  if (lim.today >= config.aiDailyCap) return { error: DAILY_LIMIT_MSG, limit: 'daily' };
+  return null;
 }
 
 export function registerAi(api, { requireAuth, id }) {
@@ -72,17 +83,33 @@ export function registerAi(api, { requireAuth, id }) {
     } catch (e) { if (e.status === 404) return res.status(404).json({ error: e.message }); throw e; }
   });
 
+  // "Write with Connectly AI" in the composer: one-shot, non-streaming, counted in the same limits and saved to history.
+  api.post('/ai/write', requireAuth, enabled, async (req, res) => {
+    const { prompt, draft } = z.object({ prompt: z.string().trim().min(1, 'Tell Connectly AI what to write').max(500), draft: z.string().max(5000).optional() }).strict().parse(req.body);
+    if (!config.groqApiKey) return res.status(503).json({ error: FALLBACK, fallback: true });
+    const uid = req.user.id;
+    const blocked = await overLimit(uid); if (blocked) return res.status(429).json(blocked);
+    const ask = `Write a Connectly post for me. Request: ${prompt}${draft?.trim() ? `\nMy current draft:\n${draft.trim()}` : ''}\nReply with ONLY the post text (you may use emojis and up to 3 hashtags), under 600 characters, no quotes or preamble.`;
+    const conv = (await q('INSERT INTO ai_conversations (user_id, title) VALUES ($1, $2) RETURNING id', [uid, `Write: ${prompt.slice(0, 50)}`])).rows[0];
+    await q("INSERT INTO ai_messages (conversation_id, user_id, role, content) VALUES ($1, $2, 'user', $3)", [conv.id, uid, ask]);
+    const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 30000);
+    try {
+      let text = ''; for await (const t of groqStream([{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: ask }], ac.signal)) text += t;
+      text = text.trim().replace(/^["“]|["”]$/g, '').slice(0, 5000);
+      if (!text) throw new Error('empty');
+      await q("INSERT INTO ai_messages (conversation_id, user_id, role, content) VALUES ($1, $2, 'assistant', $3)", [conv.id, uid, text]);
+      res.json({ text });
+    } catch (e) { console.warn('[ai] write failed:', e.status || e.name || 'error'); res.status(503).json({ error: FALLBACK, fallback: true }); }
+    finally { clearTimeout(timer); }
+  });
+
   api.post('/ai/chat', requireAuth, enabled, async (req, res) => {
     const body = Chat.parse(req.body);
     const uid = req.user.id;
     let conv;
     if (body.conversation_id) { try { conv = await own(uid, body.conversation_id); } catch (e) { return res.status(404).json({ error: e.message }); } }
     if (!config.groqApiKey) return res.status(503).json({ error: FALLBACK, fallback: true });
-    const { rows: [lim] } = await q(`SELECT
-        (SELECT count(*) FROM ai_messages WHERE role = 'user' AND user_id = $1 AND created_at > now() - interval '1 hour')::int AS mine,
-        (SELECT count(*) FROM ai_messages WHERE role = 'user' AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::int AS today`, [uid]);
-    if (lim.mine >= config.aiUserHourly) return res.status(429).json({ error: USER_LIMIT_MSG, limit: 'user' });
-    if (lim.today >= config.aiDailyCap) return res.status(429).json({ error: DAILY_LIMIT_MSG, limit: 'daily' });
+    const blocked = await overLimit(uid); if (blocked) return res.status(429).json(blocked);
 
     if (!conv) {
       const title = body.message.replace(/\s+/g, ' ').slice(0, 60);

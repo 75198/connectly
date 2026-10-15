@@ -103,3 +103,14 @@ test('per-user hourly limit and global daily cap', async () => {
   const d = await B.post('/api/ai/chat').set(H).send({ message: 'two' });
   assert.equal(d.status, 429); assert.equal(d.body.limit, 'daily');
 });
+
+test('write with Connectly AI returns post text and counts toward limits', async () => {
+  config.aiUserHourly = 100; config.aiDailyCap = 100;
+  const r = await B.post('/api/ai/write').set(H).send({ prompt: 'beach day caption' });
+  assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.text, 'Hi! Tap "What\'s on your mind?');
+  assert.match(lastBody.messages[0].content, /general|anything/i); assert.match(lastBody.messages.at(-1).content, /beach day caption/);
+  assert.equal((await B.post('/api/ai/write').set(H).send({ prompt: '' })).status, 400);
+  config.aiUserHourly = 0;
+  assert.equal((await B.post('/api/ai/write').set(H).send({ prompt: 'x' })).status, 429);
+  config.aiUserHourly = 100;
+});

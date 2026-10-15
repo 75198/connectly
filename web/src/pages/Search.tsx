@@ -7,6 +7,7 @@ import { PostList, usePosts } from '../components/PostList';
 type Person = { id: number; username: string; full_name: string; avatar_path: string | null; bio: string };
 
 export function Search() {
+  const [ai, setAi] = useState(false); useEffect(() => { getFeatures().then((f) => setAi(!!f.ai_support)); }, []);
   const [sp, setSp] = useSearchParams();
   const q = sp.get('q') || ''; const TYPES = ['people', 'posts', 'pages', 'groups', 'communities']; const type = TYPES.includes(sp.get('type') || '') ? sp.get('type')! : 'people';
   const [text, setText] = useState(q);
@@ -19,6 +20,7 @@ export function Search() {
       <label className="searchbox"><Icon name="search" /><input type="search" value={text} onChange={(e) => setText(e.target.value)} autoFocus aria-label="Search" placeholder="Search Connectly" maxLength={100} enterKeyHint="search" />{text && <button className="btn icon ghost" aria-label="Clear" onClick={() => setText('')}><Icon name="x" /></button>}</label>
       <div className="tabs scrolltabs" role="tablist">{TYPES.map((t) => <button key={t} role="tab" aria-selected={type === t} className={type === t ? 'active' : ''} onClick={() => setType(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}</div>
     </div>
+    {ai && text.trim().length >= 2 && <Link to={`/assistant?q=${encodeURIComponent(text.trim())}`} className="card person aientry askai"><span className="aiorb sm">✦</span><span className="grow"><b>Ask Connectly AI</b><small className="meta">“{text.trim()}”</small></span><Icon name="chev" /></Link>}
     {!q ? <Discover onPick={(t, ty) => { setText(t); setSp({ q: t, type: ty || type }, { replace: true }); }} /> : type === 'people' ? <People q={q} /> : type === 'posts' ? <Posts q={q} /> : <Spaces q={q} type={type} />}
   </div>;
 }
@@ -64,7 +66,7 @@ function Discover({ onPick }: { onPick: (q: string, type?: string) => void }) {
         <button className="btn icon ghost" aria-label={`Remove ${r}`} onClick={() => { const n = recent.filter((x) => x !== r); localStorage.setItem(RKEY, JSON.stringify(n)); setRecent(n); }}><Icon name="x" /></button></div>)}</div></section>}
     {people && people.length > 0 && <section className="card"><h3>People you may know</h3><div className="hscroll">{people.map((p) => <Link key={p.id} to={`/u/${p.username}`} className="pcard"><Avatar user={p} size={64} /><b>{p.full_name}</b><small className="meta">@{p.username}</small></Link>)}</div></section>}
     <section><h3 className="grouphead">Browse</h3><div className="catgrid">{CATS.map(([k, l, e, c]) => <button key={k} className="catcard" style={{ ['--c' as any]: c }} onClick={() => onPick(IDEAS[CATS.findIndex((x) => x[0] === k)] || 'a', k)}><span>{e}</span><b>{l}</b></button>)}</div></section>
-    {ai && <Link to="/assistant" className="card person aientry"><span className="aiorb sm">✦</span><span className="grow"><b>Need help? Ask Connectly AI</b><small className="meta">Posting, reels, privacy, account recovery and more</small></span><Icon name="chev" /></Link>}
+    {ai && <Link to="/assistant" className="card person aientry"><span className="aiorb sm">✦</span><span className="grow"><b>Ask Connectly AI</b><small className="meta">Ideas, captions, translations, answers and app help</small></span><Icon name="chev" /></Link>}
     <section className="card"><h3>Trending searches</h3><div className="chiprow wrap">{IDEAS.map((t) => <button key={t} className="chip" onClick={() => onPick(t)}>🔥 {t}</button>)}</div></section>
   </div>;
 }

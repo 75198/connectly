@@ -1,14 +1,14 @@
 // Connectly AI: live AI support chat (round 6). Talks only to our server (/api/ai/*);
 // replies stream in as NDJSON lines: {conversation_id} → {t: "..."}* → {done} | {error}.
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon } from '../components/ui';
 
 type Msg = { id?: number; role: 'user' | 'assistant'; content: string; error?: boolean };
 type Conv = { id: number; title: string; updated_at: string; last: string | null };
-const SUGGESTED = ['How do I create a post?', 'How do I upload a reel?', 'Who can see my stories?', 'How do I make my account private?', 'I forgot my password', 'How do I report someone?'];
+const SUGGESTED = ['✍️ Write a caption for my beach photo', '💡 Weekend ideas in Lagos', '🌍 Translate “good morning” to Yoruba', '📚 Explain photosynthesis simply', '🎬 How do I go live?', '🔒 How do I make my posts private?'];
 
 // Tiny safe formatter: **bold** and line breaks, no HTML injection.
 function Rich({ text }: { text: string }) {
@@ -24,7 +24,10 @@ export function Assistant() {
   const [status, setStatus] = useState<{ available: boolean } | null>(null); const [notice, setNotice] = useState('');
   const endRef = useRef<HTMLDivElement>(null); const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const [sp, setSp] = useSearchParams(); const asked = useRef(false);
   useEffect(() => { api('/ai/status').then(setStatus).catch(() => setStatus({ available: false })); }, []);
+  // /assistant?q=... (from Search) sends that question straight away.
+  useEffect(() => { const q0 = sp.get('q'); if (q0 && !asked.current) { asked.current = true; setSp({}, { replace: true }); send(q0); } }, []); // eslint-disable-line
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [msgs, typing]);
   const loadHistory = () => api<{ items: Conv[] }>('/ai/conversations').then((r) => setHistory(r.items)).catch(() => setHistory([]));
 
@@ -66,7 +69,7 @@ export function Assistant() {
     <header className="aihead">
       <button className="btn icon ghost" aria-label="Back" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/me'))}><Icon name="back" /></button>
       <span className="aiorb">✦</span>
-      <div className="grow"><b>Connectly AI</b><small className="meta">{status && !status.available ? 'Offline · try again later' : typing ? 'Typing…' : 'AI support · replies instantly'}</small></div>
+      <div className="grow"><b>Connectly AI</b><small className="meta">{status && !status.available ? 'Offline · try again later' : typing ? 'Typing…' : 'Ask me anything'}</small></div>
       <button className="btn icon ghost" aria-label="Chat history" onClick={() => { setShowHist((v) => !v); if (!history) loadHistory(); }}><Icon name="clock" /></button>
       <button className="btn icon ghost" aria-label="New chat" onClick={newChat}><Icon name="plus" /></button>
     </header>
@@ -79,8 +82,8 @@ export function Assistant() {
       {!msgs.length && <div className="aiwelcome">
         <span className="aiorb xl">✦</span>
         <h2>Hi{first ? ` ${first}` : ''}, how can I help?</h2>
-        <p className="meta">Ask me anything about using Connectly. I can't see or change your account, and I never share other people's info.</p>
-        <div className="aisuggest">{SUGGESTED.map((s) => <button key={s} className="chip" disabled={busy || status?.available === false} onClick={() => send(s)}>{s}</button>)}</div>
+        <p className="meta">Ask me anything: ideas, captions, translations, homework help, advice, or how to use Connectly. I never share other people’s private info.</p>
+        <div className="aisuggest">{SUGGESTED.map((s) => <button key={s} className="chip" disabled={busy || status?.available === false} onClick={() => send(s.replace(/^\S+\s/, ''))}>{s}</button>)}</div>
       </div>}
       {msgs.map((m, i) => <div key={m.id ?? `l${i}`} className={`airow ${m.role}`}>
         {m.role === 'assistant' ? <span className="aiorb sm">✦</span> : null}

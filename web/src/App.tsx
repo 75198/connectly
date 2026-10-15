@@ -42,6 +42,10 @@ const GoLive = lazy(() => import('./pages/Live').then((m) => ({ default: m.GoLiv
 const WatchLive = lazy(() => import('./pages/Live').then((m) => ({ default: m.WatchLive })));
 const Search = lazy(() => import('./pages/Search').then((m) => ({ default: m.Search })));
 
+function AiLink() {
+  const [on, setOn] = useState(false); useEffect(() => { getFeatures().then((f) => setOn(!!f.ai_support)); }, []);
+  return on ? <Link to="/assistant" className="btn icon ghost" aria-label="Connectly AI"><span className="aiorb xs">✦</span></Link> : null;
+}
 export function App() { return <SessionProvider><Router /><Toaster /></SessionProvider>; }
 
 function Toaster() {
@@ -98,7 +102,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     <Icon name="bell" />{label && <span>Notifications</span>}{unread > 0 && <b className="badge">{unread > 99 ? '99+' : unread}</b>}</NavLink>;
   return <div className="layout">
     <header className="topbar"><NavLink to="/"><Logo size={30} /></NavLink>
-      <span className="row"><ReelsLink /><Bell /><button className="btn icon ghost" onClick={toggleTheme} aria-label="Toggle dark mode"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button></span></header>
+      <span className="row"><AiLink /><ReelsLink /><Bell /><button className="btn icon ghost" onClick={toggleTheme} aria-label="Toggle dark mode"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button></span></header>
     <aside className="sidebar">
       <NavLink to="/" className="brandlink"><Logo size={36} /></NavLink>
       <nav>{items.map((i) => <NavLink key={i.to} to={i.to} end={i.end} className={i.create ? 'createlink' : ''}><Icon name={i.icon} /><span>{i.label}</span></NavLink>)}

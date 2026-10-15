@@ -109,12 +109,16 @@ async function actingPage(req) {
   const { rows } = await q("SELECT 1 FROM spaces s JOIN space_members m ON m.space_id = s.id WHERE s.id = $1 AND s.kind = 'page' AND m.user_id = $2 AND m.role IN ('owner','admin')", [sid, req.user.id]);
   return rows.length ? sid : null;
 }
+// LiveKit signalling/region endpoints for Go Live (only when configured).
+function liveConnectSrc() {
+  try { if (!config.features.live || !config.livekitUrl) return []; const h = new URL(config.livekitUrl).host; const base = h.split('.').slice(-2).join('.'); return [`wss://${h}`, `https://${h}`, `wss://*.${base}`, `https://*.${base}`]; } catch { return []; }
+}
 export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(helmet({
-    contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], mediaSrc: ["'self'", 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], connectSrc: ["'self'"], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
+    contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], mediaSrc: ["'self'", 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], connectSrc: ["'self'", ...liveConnectSrc()], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
     crossOriginResourcePolicy: { policy: 'same-origin' },
   }));
   app.use(compression({ threshold: 1024 }));

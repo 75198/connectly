@@ -84,9 +84,11 @@ export function GoLive() {
     try {
       const r = await api<{ stream: LiveStream; url: string; token: string }>('/live', { json: { title } });
       const rm = new Room({ adaptiveStream: true, dynacast: true, publishDefaults: { simulcast: true, videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360], videoEncoding: VideoPresets.h720.encoding } });
-      await rm.connect(r.url, r.token);
-      await rm.localParticipant.publishTrack(tracks.v, { simulcast: true, source: Track.Source.Camera });
-      if (tracks.a) await rm.localParticipant.publishTrack(tracks.a, { source: Track.Source.Microphone });
+      try {
+        await rm.connect(r.url, r.token);
+        await rm.localParticipant.publishTrack(tracks.v, { simulcast: true, source: Track.Source.Camera });
+        if (tracks.a) await rm.localParticipant.publishTrack(tracks.a, { source: Track.Source.Microphone });
+      } catch (e) { rm.disconnect(); await api(`/live/${r.stream.id}/end`, { method: 'POST' }).catch(() => {}); throw new Error('Couldn’t connect to live video. Check your connection and try again.'); }
       rm.on(RoomEvent.Disconnected, () => {});
       setRoom(rm); setStream(r.stream); toast('You’re live!');
     } catch (e: any) { setErr(e.message || 'Could not start the live video'); } finally { setBusy(false); }

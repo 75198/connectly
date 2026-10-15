@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { FEELINGS, Post, feelingEmoji, haptic, toast, uploadForm } from '../api';
+import { FEELINGS, Post, api, feelingEmoji, getFeatures, haptic, toast, uploadForm } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon, Sheet } from './ui';
 import { MediaStudio } from './MediaStudio';
@@ -33,7 +33,12 @@ export function ComposerForm({ onPosted, spaceId }: { onPosted: (p: Post, publis
   const [vis, setVis] = useState<Vis>(me?.default_post_visibility || 'public');
   const [file, setFile] = useState<File | null>(null); const [preview, setPreview] = useState<string | null>(null);
   const [feeling, setFeeling] = useState(''); const [place, setPlace] = useState('');
-  const [panel, setPanel] = useState<'' | 'feeling' | 'place' | 'audience'>('');
+  const [panel, setPanel] = useState<'' | 'feeling' | 'place' | 'audience' | 'ai'>('');
+  const [aiOn, setAiOn] = useState(false); const [aiPrompt, setAiPrompt] = useState(''); const [aiBusy, setAiBusy] = useState(false);
+  useEffect(() => { getFeatures().then((f) => setAiOn(!!f.ai_support)); }, []);
+  const aiWrite = async () => { const prompt = aiPrompt.trim() || 'Improve my draft'; setAiBusy(true);
+    try { const r = await api<{ text: string }>('/ai/write', { json: { prompt, ...(body.trim() ? { draft: body } : {}) } }); setBody(r.text); setPanel(''); setAiPrompt(''); toast('Connectly AI wrote a draft. Edit it as you like.'); }
+    catch (e: any) { toast(e.message, 'err'); } finally { setAiBusy(false); } };
   const [err, setErr] = useState(''); const [busy, setBusy] = useState<'' | 'post' | 'draft'>(''); const [pct, setPct] = useState(0);
   const [studio, setStudio] = useState<null | 'new' | 'edit'>(null); const [enhance, setEnhance] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -82,10 +87,14 @@ export function ComposerForm({ onPosted, spaceId }: { onPosted: (p: Post, publis
       <button type="button" className="btn icon previewx" aria-label="Remove" onClick={() => { setFile(null); if (input.current) input.current.value = ''; }}><Icon name="x" /></button></div>}
     {panel === 'audience' && <div className="optpanel" role="radiogroup" aria-label="Audience">{AUD.map((a) => <button type="button" key={a.k} role="radio" aria-checked={vis === a.k} className={`optrow ${vis === a.k ? 'on' : ''}`} onClick={() => { setVis(a.k); setPanel(''); }}>
       <span className="opticon"><Icon name={a.icon} /></span><span className="grow"><b>{a.label}</b><small className="meta">{a.hint}</small></span>{vis === a.k && '✓'}</button>)}</div>}
+    {panel === 'ai' && <div className="optpanel aiwrite"><span className="aiorb sm">✦</span>
+      <input autoFocus value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} maxLength={500} placeholder={body.trim() ? 'How should I improve it? (e.g. make it funnier)' : 'What should I write? (e.g. caption for my graduation)'} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); aiWrite(); } }} aria-label="Write with Connectly AI" />
+      <button type="button" className="btn primary" disabled={aiBusy} onClick={aiWrite}>{aiBusy ? 'Writing…' : 'Write'}</button></div>}
     {panel === 'feeling' && <div className="optpanel feelgrid">{FEELINGS.map((f) => <button type="button" key={f.k} className={`chip ${feeling === f.k ? 'on' : ''}`} onClick={() => { setFeeling(feeling === f.k ? '' : f.k); setPanel(''); }}>{f.e} {f.k}</button>)}</div>}
     {panel === 'place' && <div className="optpanel"><label>Where are you?<input value={place} onChange={(e) => setPlace(e.target.value)} maxLength={120} autoFocus autoComplete="off" /></label></div>}
     <div className="composeropts">
       <label className="optbtn"><span className="dotc green"><Icon name="image" /></span>Photo/video<input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,video/3gpp" hidden onChange={(e) => pick(e.target.files?.[0])} /></label>
+      {aiOn && <button type="button" className="optbtn" onClick={() => setPanel(panel === 'ai' ? '' : 'ai')}><span className="dotc aidot">✦</span>Write with Connectly AI</button>}
       <button type="button" className="optbtn" onClick={() => setStudio('new')}><span className="dotc blue">📷</span>Camera</button>
       {!isVideo && <button type="button" className="optbtn" onClick={() => setPanel(panel === 'feeling' ? '' : 'feeling')}><span className="dotc amber">🙂</span>Feeling</button>}
       {!isVideo && <button type="button" className="optbtn" onClick={() => setPanel(panel === 'place' ? '' : 'place')}><span className="dotc red"><Icon name="pin" /></span>Location</button>}

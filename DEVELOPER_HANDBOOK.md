@@ -126,7 +126,10 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - History: new tables `ai_conversations` and `ai_messages` (additive). `GET /api/ai/conversations`, `GET /api/ai/conversations/:id` (own chats only), `GET /api/ai/status`. The last 12 messages are sent as context.
 - Limits (counted from `ai_messages`, so they survive restarts): `AI_USER_HOURLY` (default 30) per user per hour, `AI_DAILY_CAP` (default 900) for everyone per UTC day to stay inside the Groq free tier. Both return 429 with a friendly "try later" message.
 - Fallback: no key gives 503 with a canned help message; Groq errors or timeouts (45 s) stream a friendly `{error}`. The UI shows it as a bubble.
-- System prompt (`SYSTEM_PROMPT`): Connectly help only, never reveals other users' data, cannot take account actions, points serious issues to Report.
+- Scope (`SYSTEM_PROMPT`): a general assistant like Meta AI (knowledge, captions and posts, ideas, translation, homework help, advice) plus Connectly help. Safety rules: refuses harmful requests, never reveals other people's private data, cannot take account actions, points serious issues to Report.
+- `POST /api/ai/write {prompt, draft?}` (one-shot, same limits, saved to history) powers "Write with Connectly AI" in the composer.
+- Entry points: Home top bar ✦ button, Profile hub, Search (an "Ask Connectly AI" card on Discover, plus an "Ask Connectly AI “query”" row while typing that opens `/assistant?q=` and sends it), and the composer.
+- Go Live needs the LiveKit host in CSP `connect-src`; `liveConnectSrc()` in `server/app.js` adds it when `FEATURE_LIVE=1`.
 - Client `web/src/pages/Assistant.tsx` at `/assistant` (full screen): bubbles, typing dots, suggested questions, new chat, history panel, light/dark via theme variables.
 - Tests: `tests/ai.test.js` uses a local mock Groq server.
 

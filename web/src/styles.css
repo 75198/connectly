@@ -530,3 +530,5 @@ button,a,.chip,.btn{transition:transform .12s ease,background-color .15s ease,co
 .permcard h2{margin:4px 0 0;font-size:1.2rem;letter-spacing:-.01em}.permcard p{margin:0 0 6px;color:var(--muted,#5F6F6C)}
 .permsteps{text-align:left;margin:0 0 8px;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:.92rem}
 @keyframes permfade{from{opacity:0}}@keyframes permup{from{transform:translateY(30px)}}
+.aiorb.xs{width:26px;height:26px;font-size:.75rem}.askai{border:1px solid var(--border)}
+.aiwrite{display:flex;gap:8px;align-items:center}.aiwrite input{flex:1;min-width:0;border:1px solid var(--border);border-radius:12px;padding:10px 12px;font:inherit;background:var(--bg);color:var(--text)}.dotc.aidot{background:conic-gradient(from 200deg,#0F766E,#0EA5E9,#8B5CF6,#F59E0B,#0F766E);color:#fff}
