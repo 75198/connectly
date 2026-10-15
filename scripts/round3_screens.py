@@ -1,0 +1,45 @@
+# Round 3 mobile screenshots. Needs a local DB seeded with SEED_DEMO=1. Usage: python3 scripts/round3_screens.py [BASE]
+import sys, os
+from playwright.sync_api import sync_playwright
+BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:3000'
+OUT = 'screenshots/round3'; os.makedirs(OUT, exist_ok=True)
+errors = []
+JS_API = """async ([path, body]) => { const r = await fetch('/api' + path, { method: body === null ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', 'X-Connectly-CSRF': '1' }, body: body === null ? undefined : JSON.stringify(body) }); return [r.status, await r.json().catch(() => null)]; }"""
+with sync_playwright() as p:
+    b = p.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+    c = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    pg = c.new_page(); pg.set_default_timeout(15000)
+    pg.on('pageerror', lambda e: errors.append(str(e)))
+    pg.on('console', lambda m: m.type == 'error' and errors.append(m.text))
+    shot = lambda n: (pg.wait_for_timeout(600), pg.screenshot(path=f'{OUT}/{n}.png'))
+    go = lambda path: pg.goto(BASE + path, wait_until='networkidle')
+    api = lambda path, body=None: pg.evaluate(JS_API, [path, body])
+    go('/login'); pg.fill('input[autocomplete=username]', 'alice'); pg.fill('input[type=password]', 'Connectly123!'); pg.click('button:has-text("Log in")')
+    pg.wait_for_selector('.bottomnav'); shot('01-feed')
+    go('/me'); shot('02-profile-hub')
+    go('/settings'); shot('03-privacy-settings')
+    go('/settings/sessions'); shot('04-active-sessions')
+    go('/create/page'); pg.fill('input', 'Lagos Bakery'); pg.select_option('select', index=1); pg.fill('textarea', 'Fresh bread every morning in Yaba.'); shot('05-create-page')
+    pg.click('button:has-text("Create page")'); pg.wait_for_selector('text=Act as this page'); pg.click('text=Act as this page'); pg.wait_for_timeout(800)
+    pg.fill('textarea', 'Our sourdough is back in stock today!'); pg.click('button:has-text("Post")'); pg.wait_for_timeout(1200); shot('06-page-acting-as')
+    api('/me/acting', {'space_id': None})
+    go('/market/new'); pg.fill('label:has-text("Title") input', 'iPhone 12, 128GB'); pg.fill('label:has-text("Price") input', '250000')
+    pg.locator('label:has-text("Category") select').select_option(index=2); pg.fill('textarea', 'Clean, battery 89%.')
+    pg.locator('.placepicker input').fill('Ikej'); pg.wait_for_selector('.aclist li'); shot('07-new-listing-places')
+    pg.locator('.aclist li').first.dispatch_event('mousedown')
+    pg.set_input_files('input[type=file]', 'web/public/icon-512.png' if os.path.exists('web/public/icon-512.png') else [f for f in [os.path.join('web/public', x) for x in os.listdir('web/public')] if f.endswith('.png')][0])
+    pg.click('button:has-text("Publish listing")'); pg.wait_for_selector('text=Mark as sold'); shot('08-listing-view')
+    go('/market'); shot('09-marketplace')
+    # bob interacts with alice for notifications
+    c2 = b.new_context(); p2 = c2.new_page(); p2.goto(BASE + '/login'); p2.fill('input[autocomplete=username]', 'bob'); p2.fill('input[type=password]', 'Connectly123!'); p2.click('button:has-text("Log in")'); p2.wait_for_selector('.bottomnav', state='attached')
+    p2.evaluate("() => fetch('/api/users/alice/follow', { method: 'PUT', headers: { 'X-Connectly-CSRF': '1' } })")
+    c2.close()
+    go('/notifications'); shot('10-notifications')
+    go('/friends'); shot('11-friends')
+    go('/search?q=bake&type=pages'); shot('12-search-pages')
+    go('/u/alice'); shot('13-profile')
+    go('/settings/profile'); loc = pg.locator('.placepicker input').first; loc.fill('Abeok'); pg.wait_for_selector('.aclist li'); shot('14-edit-profile-city')
+    go('/me'); pg.click('button:has-text("Sign out")'); pg.wait_for_selector('.sheet'); shot('15-signout-sheet')
+    pg.click('button:has-text("Save this account")'); pg.wait_for_selector('text=Saved on this device'); shot('16-login-saved-accounts')
+    b.close()
+print('errors:', errors[:10])
