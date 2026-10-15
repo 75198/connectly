@@ -27,7 +27,7 @@ export function Onboarding() {
   const run = async (fn: () => Promise<void>) => { setErr(''); setBusy(true); try { await fn(); } catch (e: any) { setErr(e.message || 'Something went wrong'); } finally { setBusy(false); } };
 
   const photo = (f?: File) => f && run(async () => {
-    if (f.size > 5 * 1024 * 1024) throw new Error('Image must be 5 MB or smaller');
+    if (f.size > 15 * 1024 * 1024) throw new Error('Image must be 15 MB or smaller');
     const fd = new FormData(); fd.append('image', f); await api('/me/avatar', { form: fd }); await refresh(); setNote('Looking good!');
   });
   const notifications = () => run(async () => {

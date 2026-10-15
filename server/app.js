@@ -18,6 +18,7 @@ import { loadUser, requireVerified, requireAuth, requireAdmin, requireModerator,
 import { upload, saveImage, removeImage, HttpError } from './uploads.js';
 import { notify, registerSocial } from './social.js';
 import { registerReels } from './reels.js';
+import { registerPostExtras } from './postextras.js';
 import { newChallenge, verifyPow } from './pow.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -41,8 +42,9 @@ const ProfileSchema = z.object({
   hometown_place_id: z.number().int().positive().nullable().optional(),
 }).strict(); // .strict(): unknown keys such as "role"/"is_admin" are rejected
 const Visibility = z.enum(['public', 'friends', 'private']);
-const PostCreateSchema = z.object({ body: z.string().trim().max(5000).default(''), visibility: Visibility.default('public') }).strict();
-const PostEditSchema = z.object({ body: z.string().trim().max(5000).optional(), visibility: Visibility.optional(), remove_image: z.boolean().optional() }).strict();
+export const REACTIONS = ['like', 'love', 'haha', 'wow', 'sad', 'angry'];
+const PostCreateSchema = z.object({ body: z.string().trim().max(5000).default(''), visibility: Visibility.default('public'), feeling: z.string().trim().max(40).default(''), location_tag: z.string().trim().max(120).default(''), as_draft: z.enum(['0', '1']).default('0'), enhance: z.enum(['0', '1']).optional() }).strict();
+const PostEditSchema = z.object({ body: z.string().trim().max(5000).optional(), visibility: Visibility.optional(), remove_image: z.boolean().optional(), feeling: z.string().trim().max(40).optional(), location_tag: z.string().trim().max(120).optional() }).strict();
 const CommentSchema = z.object({ body: z.string().trim().min(1).max(2000), parent_id: z.number().int().positive().nullish() }).strict();
 const welcomeText = (name) => `Hi ${name.split(' ')[0]},
 
@@ -62,12 +64,15 @@ const id = (v) => { const n = Number(v); if (!Number.isSafeInteger(n) || n <= 0)
 const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility = 'friends' AND EXISTS (
   SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND
    ((f.requester_id = $1 AND f.addressee_id = p.author_id) OR (f.addressee_id = $1 AND f.requester_id = p.author_id)))))
-  AND p.hidden_at IS NULL AND NOT EXISTS (SELECT 1 FROM users su WHERE su.id = p.author_id AND su.suspended_at IS NOT NULL)
+  AND p.hidden_at IS NULL AND p.deleted_at IS NULL AND NOT p.is_draft AND NOT EXISTS (SELECT 1 FROM users su WHERE su.id = p.author_id AND su.suspended_at IS NOT NULL)
   AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $1))`;
 // author of a post/comment: the page when posted "as a page", otherwise the user
 const authorJson = (alias, userAlias) => `CASE WHEN ${alias}.as_space_id IS NOT NULL THEN (SELECT json_build_object('id', s.id, 'username', s.slug, 'full_name', s.name, 'avatar_path', s.photo_path, 'space', true, 'kind', s.kind) FROM spaces s WHERE s.id = ${alias}.as_space_id)
   ELSE json_build_object('id', ${userAlias}.id, 'username', ${userAlias}.username, 'full_name', ${userAlias}.full_name, 'avatar_path', ${userAlias}.avatar_path) END`;
-const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at, p.kind, p.video_path, p.poster_path, p.video_seconds,
+const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at, p.kind, p.video_path, p.video_low_path, p.poster_path, p.video_seconds, p.feeling, p.location_tag, p.is_draft, p.deleted_at,
+  (SELECT l.reaction FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $1) AS my_reaction,
+  (SELECT COALESCE(json_object_agg(x.reaction, x.n), '{}') FROM (SELECT reaction, count(*)::int AS n FROM post_likes l WHERE l.post_id = p.id GROUP BY reaction) x) AS reactions,
+  EXISTS (SELECT 1 FROM saved_posts sp WHERE sp.post_id = p.id AND sp.user_id = $1) AS saved_by_me,
   (SELECT count(*)::int FROM reel_views rv WHERE rv.post_id = p.id) AS view_count,
   ${authorJson('p', 'u')} AS author, (p.author_id = $1) AS is_mine,
   (SELECT json_build_object('slug', s.slug, 'name', s.name, 'kind', s.kind) FROM spaces s WHERE s.id = p.space_id) AS space,
@@ -77,6 +82,10 @@ const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_
   FROM posts p JOIN users u ON u.id = p.author_id AND (u.deactivated_at IS NULL OR u.id = $1)`;
 const publicUser = (u) => u && ({ id: u.id, username: u.username, full_name: u.full_name, bio: u.bio, location: u.location, hometown: u.hometown, interests: u.interests || [], relationship_status: u.relationship_status, work_company: u.work_company, work_role: u.work_role, education: u.education, avatar_path: u.avatar_path, cover_path: u.cover_path });
 
+async function getOwnPost(userId, postId) {
+  const { rows } = await q(`${POST_SELECT} WHERE p.id = $2 AND p.author_id = $1`, [userId, postId]);
+  return rows[0] || null;
+}
 async function getVisiblePost(viewerId, postId) {
   const { rows } = await q(`${POST_SELECT} WHERE p.id = $2 AND ${VISIBLE}`, [viewerId, postId]);
   return rows[0] || null;
@@ -274,7 +283,7 @@ export function createApp() {
 
   api.get('/me', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT * FROM users WHERE id = $1', [req.user.id]);
-    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility,
+    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility, theme_pref: rows[0].theme_pref,
       acting_as: req.user.acting_space_id ? (await q('SELECT id, slug, name, photo_path FROM spaces WHERE id = $1', [req.user.acting_space_id])).rows[0] || null : null,
       unread_notifications: (await q('SELECT count(*) AS n FROM notifications WHERE user_id = $1 AND read_at IS NULL', [req.user.id])).rows[0].n, current_place_id: rows[0].current_place_id, hometown_place_id: rows[0].hometown_place_id, roles: req.user.roles });
   });
@@ -340,7 +349,7 @@ export function createApp() {
   // ---------- posts ----------
   api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, "p.kind = 'post'", [], req.query.cursor, req.query.limit)));
   api.post('/posts', requireVerified, upload.single('image'), async (req, res) => {
-    const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined });
+    const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined, feeling: req.body?.feeling || undefined, location_tag: req.body?.location_tag || undefined, as_draft: req.body?.as_draft || undefined, enhance: req.body?.enhance || undefined });
     if (!d.body && !req.file) return res.status(400).json({ error: 'Write something or add a photo' });
     let spaceId = null, asSpace = await actingPage(req);
     if (req.body?.space_id) {
@@ -352,9 +361,9 @@ export function createApp() {
       spaceId = sp.id; if (sp.kind === 'page') asSpace = sp.id;
       d.visibility = 'public';
     }
-    const img = req.file ? await saveImage(req.file.buffer, 'post') : null;
-    const { rows } = await q('INSERT INTO posts (author_id, body, image_path, visibility, space_id, as_space_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [req.user.id, d.body, img, d.visibility, spaceId, asSpace]);
-    res.status(201).json(await getVisiblePost(req.user.id, rows[0].id));
+    const img = req.file ? await saveImage(req.file.buffer, 'post', { enhance: req.body?.enhance === '1' }) : null;
+    const { rows } = await q('INSERT INTO posts (author_id, body, image_path, visibility, space_id, as_space_id, feeling, location_tag, is_draft) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [req.user.id, d.body, img, d.visibility, spaceId, asSpace, d.feeling, d.location_tag, d.as_draft === '1']);
+    res.status(201).json(await getOwnPost(req.user.id, rows[0].id));
   });
   api.get('/posts/:id', requireAuth, async (req, res) => {
     const p = await getVisiblePost(req.user.id, id(req.params.id));
@@ -362,7 +371,7 @@ export function createApp() {
     res.json(p);
   });
   const ownPost = async (req, res) => {
-    const { rows } = await q(`SELECT p.id, p.author_id, p.image_path, p.video_path, p.poster_path, p.body FROM posts p WHERE p.id = $2 AND ${VISIBLE}`, [req.user.id, id(req.params.id)]);
+    const { rows } = await q(`SELECT p.id, p.author_id, p.image_path, p.video_path, p.poster_path, p.body FROM posts p WHERE p.id = $2 AND (p.author_id = $1 OR ${VISIBLE}) AND p.deleted_at IS NULL AND p.hidden_at IS NULL`, [req.user.id, id(req.params.id)]);
     if (!rows[0]) { res.status(404).json({ error: 'Post not found' }); return null; }
     if (rows[0].author_id !== req.user.id) { res.status(403).json({ error: 'You can only change your own posts' }); return null; }
     return rows[0];
@@ -373,21 +382,22 @@ export function createApp() {
     const body = d.body ?? post.body;
     const image = d.remove_image ? null : post.image_path;
     if (!body && !image && !post.video_path) return res.status(400).json({ error: 'A post needs text or a photo' });
-    await q('UPDATE posts SET body = $1, image_path = $2, visibility = COALESCE($3, visibility), updated_at = now() WHERE id = $4 AND author_id = $5', [body, image, d.visibility ?? null, post.id, req.user.id]);
+    await q('UPDATE posts SET body = $1, image_path = $2, visibility = COALESCE($3, visibility), feeling = COALESCE($6, feeling), location_tag = COALESCE($7, location_tag), updated_at = now() WHERE id = $4 AND author_id = $5', [body, image, d.visibility ?? null, post.id, req.user.id, d.feeling ?? null, d.location_tag ?? null]);
     if (d.remove_image) removeImage(post.image_path);
-    res.json(await getVisiblePost(req.user.id, post.id));
+    res.json(await getOwnPost(req.user.id, post.id));
   });
   api.delete('/posts/:id', requireAuth, async (req, res) => {
     const post = await ownPost(req, res); if (!post) return;
-    await q('DELETE FROM posts WHERE id = $1 AND author_id = $2', [post.id, req.user.id]);
-    removeImage(post.image_path); removeImage(post.video_path); removeImage(post.poster_path);
-    res.json({ ok: true });
+    await q('UPDATE posts SET deleted_at = now() WHERE id = $1 AND author_id = $2', [post.id, req.user.id]);
+    res.json({ ok: true, recently_deleted: true, purge_after_days: 30 });
   });
   const likeCount = async (postId) => (await q('SELECT count(*) AS n FROM post_likes WHERE post_id = $1', [postId])).rows[0].n;
   api.put('/posts/:id/like', requireAuth, async (req, res) => {
     const p = await getVisiblePost(req.user.id, id(req.params.id));
     if (!p) return res.status(404).json({ error: 'Post not found' });
-    const ins = await q('INSERT INTO post_likes (post_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [p.id, req.user.id]);
+    const reaction = z.object({ reaction: z.enum(REACTIONS).default('like') }).strict().parse(req.body || {}).reaction;
+    const ins = await q('INSERT INTO post_likes (post_id, user_id, reaction) VALUES ($1,$2,$3) ON CONFLICT (post_id, user_id) DO UPDATE SET reaction = EXCLUDED.reaction RETURNING (xmax = 0) AS inserted', [p.id, req.user.id, reaction]);
+    ins.rowCount = ins.rows[0]?.inserted ? 1 : 0;
     if (ins.rowCount) { const { rows: own } = await q('SELECT author_id FROM posts WHERE id = $1', [p.id]); await notify(own[0].author_id, req.user.id, 'like', { post_id: p.id }); }
     res.json({ liked_by_me: true, like_count: await likeCount(p.id) });
   });
@@ -462,10 +472,10 @@ export function createApp() {
 
   // ---------- settings ----------
   api.patch('/me/settings', requireAuth, async (req, res) => {
-    const d = z.object({ email_notifications: z.boolean().optional(), inapp_notifications: z.boolean().optional(), default_post_visibility: Visibility.optional(), profile_details_visibility: Visibility.optional() }).strict().parse(req.body);
+    const d = z.object({ email_notifications: z.boolean().optional(), inapp_notifications: z.boolean().optional(), default_post_visibility: Visibility.optional(), profile_details_visibility: Visibility.optional(), theme_pref: z.enum(['light', 'dark', 'system']).optional() }).strict().parse(req.body);
     await q(`UPDATE users SET email_notifications = COALESCE($1, email_notifications), inapp_notifications = COALESCE($2, inapp_notifications),
-      default_post_visibility = COALESCE($3, default_post_visibility), profile_details_visibility = COALESCE($4, profile_details_visibility) WHERE id = $5`,
-      [d.email_notifications ?? null, d.inapp_notifications ?? null, d.default_post_visibility ?? null, d.profile_details_visibility ?? null, req.user.id]);
+      default_post_visibility = COALESCE($3, default_post_visibility), profile_details_visibility = COALESCE($4, profile_details_visibility), theme_pref = COALESCE($6, theme_pref) WHERE id = $5`,
+      [d.email_notifications ?? null, d.inapp_notifications ?? null, d.default_post_visibility ?? null, d.profile_details_visibility ?? null, req.user.id, d.theme_pref ?? null]);
     res.json({ ok: true });
   });
   const checkPassword = async (req) => {
@@ -485,7 +495,7 @@ export function createApp() {
   api.post('/me/delete', requireAuth, async (req, res) => {
     await checkPassword(req);
     const { rows: files } = await q(`SELECT avatar_path AS p FROM users WHERE id = $1 UNION ALL SELECT cover_path FROM users WHERE id = $1
-      UNION ALL SELECT unnest(ARRAY[image_path, video_path, poster_path]) FROM posts WHERE author_id = $1 OR space_id IN (SELECT id FROM spaces WHERE owner_id = $1)
+      UNION ALL SELECT unnest(ARRAY[image_path, video_path, poster_path, video_low_path]) FROM posts WHERE author_id = $1 OR space_id IN (SELECT id FROM spaces WHERE owner_id = $1) UNION ALL SELECT image_path FROM stories WHERE author_id = $1
       UNION ALL SELECT photo_path FROM spaces WHERE owner_id = $1 UNION ALL SELECT ph.path FROM listing_photos ph JOIN listings l ON l.id = ph.listing_id WHERE l.seller_id = $1`, [req.user.id]);
     await q('DELETE FROM users WHERE id = $1', [req.user.id]); // cascades to sessions, posts, comments, likes, etc.
     for (const f of files) removeImage(f.p);
@@ -533,6 +543,7 @@ export function createApp() {
   });
   registerSocial(api, { requireAuth, requireVerified, id, pagePosts, checkPassword, BCRYPT_COST, config });
   registerReels(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility });
+  registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
   // ---------- reports & moderation ----------
   const ReportSchema = z.object({ target_type: z.enum(['post', 'user']), post_id: z.number().int().positive().optional(), username: z.string().max(40).optional(), reason: z.string().trim().min(3, 'Tell us briefly what is wrong').max(500) }).strict();
@@ -646,7 +657,7 @@ export function createApp() {
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     if (err instanceof ZodError) return res.status(400).json({ error: err.issues[0]?.message || 'Invalid input', issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
-    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: err.field === 'video' ? 'Video must be 50 MB or smaller' : 'Image must be 5 MB or smaller' });
+    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: err.field === 'video' ? 'Video must be 50 MB or smaller' : 'Image must be 15 MB or smaller' });
     if (err?.name === 'MulterError') return res.status(400).json({ error: err.message });
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
     if (err?.status && err.status < 500) return res.status(err.status).json({ error: err.message });

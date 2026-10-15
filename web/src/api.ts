@@ -1,11 +1,12 @@
 export type User = { hometown?: string; interests?: string[]; relationship_status?: string; work_company?: string; work_role?: string; education?: string; current_place_id?: number | null; hometown_place_id?: number | null;
   friend_status?: 'none' | 'outgoing' | 'incoming' | 'friends'; following?: boolean; follower_count?: number; friend_count?: number;
-  email_notifications?: boolean; inapp_notifications?: boolean; default_post_visibility?: 'public' | 'friends' | 'private'; profile_details_visibility?: 'public' | 'friends' | 'private';
+  email_notifications?: boolean; inapp_notifications?: boolean; default_post_visibility?: 'public' | 'friends' | 'private'; theme_pref?: 'light' | 'dark' | 'system'; profile_details_visibility?: 'public' | 'friends' | 'private';
   acting_as?: { id: number; slug: string; name: string; photo_path: string | null } | null; unread_notifications?: number; id: number; username: string; full_name: string; bio: string; location: string; avatar_path: string | null; cover_path: string | null; created_at?: string; email?: string | null; phone?: string | null; email_verified?: boolean; onboarded?: boolean; roles?: string[]; post_count?: number; is_me?: boolean };
 export type Author = { id: number; username: string; full_name: string; avatar_path: string | null; space?: boolean; kind?: string };
 export const authorHref = (a: Author) => (a.space ? `/s/${a.username}` : `/u/${a.username}`);
 export type Post = { id: number; body: string; image_path: string | null; visibility: 'public' | 'friends' | 'private'; created_at: string; updated_at: string; author: Author; is_mine: boolean; space: { slug: string; name: string; kind: string } | null; like_count: number; comment_count: number; liked_by_me: boolean;
-  kind?: 'post' | 'reel'; video_path?: string | null; poster_path?: string | null; video_seconds?: number | null; view_count?: number };
+  kind?: 'post' | 'reel'; video_path?: string | null; video_low_path?: string | null; poster_path?: string | null; video_seconds?: number | null; view_count?: number;
+  feeling?: string; location_tag?: string; is_draft?: boolean; deleted_at?: string | null; my_reaction?: Reaction | null; reactions?: Partial<Record<Reaction, number>>; saved_by_me?: boolean };
 export type Comment = { id: number; post_id: number; parent_id: number | null; body: string; created_at: string; author: Author; is_mine?: boolean };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
@@ -50,4 +51,43 @@ let featuresP: Promise<Features> | null = null;
 export function getFeatures(): Promise<Features> {
   if (!featuresP) featuresP = api<{ features?: Features }>('/auth/capabilities').then((c) => c.features || { reels: false, welcome_hero: false }).catch(() => { featuresP = null; return { reels: false, welcome_hero: false }; });
   return featuresP;
+}
+
+export type Reaction = 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry';
+export const REACTIONS: { k: Reaction; e: string; label: string }[] = [
+  { k: 'like', e: '👍', label: 'Like' }, { k: 'love', e: '❤️', label: 'Love' }, { k: 'haha', e: '😂', label: 'Haha' },
+  { k: 'wow', e: '😮', label: 'Wow' }, { k: 'sad', e: '😢', label: 'Sad' }, { k: 'angry', e: '😡', label: 'Angry' },
+];
+export const FEELINGS: { k: string; e: string }[] = [
+  { k: 'happy', e: '😊' }, { k: 'loved', e: '🥰' }, { k: 'excited', e: '🤩' }, { k: 'grateful', e: '🙏' }, { k: 'blessed', e: '😇' },
+  { k: 'relaxed', e: '😌' }, { k: 'proud', e: '😎' }, { k: 'tired', e: '😴' }, { k: 'sad', e: '😢' }, { k: 'hungry', e: '😋' },
+];
+export const feelingEmoji = (k?: string) => FEELINGS.find((f) => f.k === k)?.e || '🙂';
+
+// Post timestamps in the viewer's local time: Just now, 5m, 3h (today), Today 10:24 PM, Yesterday 9:10 AM, then a full date.
+export function postTime(iso: string, now = new Date()) {
+  const d = new Date(iso); const s = (now.getTime() - d.getTime()) / 1000;
+  const t = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (s < 60) return 'Just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400000);
+  if (diff === 0) return s < 4 * 3600 ? `${Math.floor(s / 3600)}h` : `Today ${t}`;
+  if (diff === 1) return `Yesterday ${t}`;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) }) + ` at ${t}`;
+}
+
+// Tiny toast bus: toast('Posted') from anywhere; <Toaster/> in App renders it.
+export function toast(text: string, kind: 'ok' | 'err' = 'ok') { window.dispatchEvent(new CustomEvent('cx-toast', { detail: { text, kind } })); }
+export function haptic(ms = 8) { try { (navigator as any).vibrate?.(ms); } catch { /* not supported */ } }
+
+// Upload with progress (fetch has no upload progress).
+export function uploadForm<T>(path: string, fd: FormData, onProgress?: (pct: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest(); x.open('POST', `/api${path}`); x.setRequestHeader('X-Connectly-CSRF', '1');
+    if (onProgress) x.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
+    x.onload = () => { let d: any = {}; try { d = JSON.parse(x.responseText); } catch { /* */ } x.status < 300 ? resolve(d) : reject(new ApiError(x.status, d.error || `Request failed (${x.status})`)); };
+    x.onerror = () => reject(new ApiError(0, 'Network error. Check your connection and try again.'));
+    x.send(fd);
+  });
 }

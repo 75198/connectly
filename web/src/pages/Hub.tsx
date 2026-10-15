@@ -34,6 +34,9 @@ export function Hub() {
     {spaces !== null && followed.length > 0 && <section className="card"><h3>Pages you follow</h3>{followed.map((s) => row(s))}</section>}
     <div className="card list">
       <Link to="/friends"><Icon name="users" /> Friends</Link>
+      <Link to="/me/saved"><Icon name="bookmark" /> Saved</Link>
+      <Link to="/me/drafts"><Icon name="image" /> Drafts</Link>
+      <Link to="/me/deleted"><Icon name="trash" /> Recently deleted</Link>
       <Link to="/notifications"><Icon name="bell" /> Notifications</Link>
       <Link to="/market?mine=1"><Icon name="shop" /> Your listings</Link>
       <Link to="/settings"><Icon name="gear" /> Privacy and settings</Link>

@@ -23,7 +23,7 @@ export const config = {
   },
   powBits: Number(env.POW_BITS || (isTest ? 4 : 17)),
   codeSecret: env.CODE_SECRET || 'dev-only-secret',
-  maxUploadBytes: 5 * 1024 * 1024,
+  maxUploadBytes: 15 * 1024 * 1024,
   maxVideoBytes: 50 * 1024 * 1024,
   maxVideoSeconds: 60,
   ffmpegPath: env.FFMPEG_PATH || 'ffmpeg',

@@ -14,12 +14,15 @@ const SECTIONS: [string, string, Parameters<typeof Icon>[0]['name']][] = [
 const Back = ({ title }: { title: string }) => <div className="row"><Link to="/settings" className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">{title}</h1></div>;
 
 export function Settings() {
-  const { theme, toggleTheme } = useSession();
+  const { themePref, setThemePref } = useSession();
   return <div className="stack">
     <div className="row"><Link to="/me" className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">Privacy and settings</h1></div>
+    <section className="card"><h3>Appearance</h3>
+      <div className="segmented" role="radiogroup" aria-label="Theme">{([['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'gear']] as const).map(([k, l, ic]) =>
+        <button key={k} role="radio" aria-checked={themePref === k} className={themePref === k ? 'on' : ''} onClick={() => setThemePref(k)}><Icon name={ic} /> {l}</button>)}</div>
+      <p className="meta">System follows your phone’s light or dark setting. Saved to your account.</p></section>
     <div className="card list">{SECTIONS.map(([k, label, icon]) => <Link key={k} to={`/settings/${k}`}><Icon name={icon} /> <span className="grow">{label}</span><Icon name="chev" /></Link>)}</div>
     <div className="card list">
-      <button onClick={toggleTheme}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
       <Link to="/terms"><Icon name="shield" /> Terms &amp; Conditions</Link><Link to="/privacy"><Icon name="lock" /> Privacy Policy</Link>
     </div>
   </div>;

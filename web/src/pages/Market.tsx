@@ -26,12 +26,12 @@ export function Market() {
   useEffect(() => { const t = setTimeout(() => { if ((sp.get('q') || '') !== q.trim()) setParam('q', q.trim()); }, 350); return () => clearTimeout(t); }, [q]); // eslint-disable-line
   return <div className="stack">
     <div className="row between"><h1 className="pagetitle">{mine ? 'Your listings' : 'Marketplace'}</h1><Link className="btn primary" to="/market/new"><Icon name="plus" /> Sell</Link></div>
-    {!mine && <div className="card stack">
-      <label className="searchbox"><Icon name="search" /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search marketplace" maxLength={100} enterKeyHint="search" /></label>
+    {!mine && <div className="stack">
+      <label className="searchbox"><Icon name="search" /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search marketplace" placeholder="Search Marketplace" maxLength={100} enterKeyHint="search" /></label>
+      <div className="chiprow catchips">{['', ...(meta?.categories || [])].map((c) => <button key={c || 'all'} className={`chip ${(sp.get('category') || '') === c ? 'on' : ''}`} onClick={() => setParam('category', c)}>{c ? `${catEmoji(c)} ${c}` : '✨ All'}</button>)}</div>
       <div className="row wrap">
-        <select aria-label="Category" value={sp.get('category') || ''} onChange={(e) => setParam('category', e.target.value)}><option value="">All categories</option>{meta?.categories.map((c) => <option key={c}>{c}</option>)}</select>
         <select aria-label="Sort" value={sp.get('sort') || 'newest'} onChange={(e) => setParam('sort', e.target.value === 'newest' ? '' : e.target.value)}><option value="newest">Newest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select>
-        <button className="btn ghost" onClick={() => setShowFilters(!showFilters)}>{showFilters ? 'Hide filters' : 'More filters'}</button>
+        <button className="btn ghost" onClick={() => setShowFilters(!showFilters)}><Icon name="sliders" /> {showFilters ? 'Hide filters' : 'Filters'}</button>
       </div>
       {showFilters && <div className="grid2">
         <label>Min price<input inputMode="decimal" value={sp.get('min') || ''} onChange={(e) => setParam('min', e.target.value.replace(/[^\d.]/g, ''))} /></label>
@@ -42,7 +42,7 @@ export function Market() {
     </div>}
     {mine && <Link to="/market" className="linkish">← Browse marketplace</Link>}
     {err && <p className="error card">{err}</p>}
-    {!items ? <div className="spinner" /> : items.length === 0 ? <p className="card empty">{mine ? 'You haven’t listed anything yet.' : 'No listings match.'}</p> : <div className="mgrid">
+    {!items ? <div className="mgrid">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="mcard skel"><span className="sk block sq" /><span className="sk line w60" /><span className="sk line w40" /></div>)}</div> : items.length === 0 ? <p className="card empty">{mine ? 'You haven’t listed anything yet.' : 'No listings match.'}</p> : <div className="mgrid">
       {items.map((l) => <Link key={l.id} to={`/market/${l.id}`} className="mcard"><div className="mimg">{l.photos[0] && <img src={l.photos[0]} alt="" loading="lazy" />}{l.status === 'sold' && <span className="soldtag">Sold</span>}</div>
         <b>{money(l.price, l.currency)}</b><span className="mtitle">{l.title}</span><small className="meta">{l.location || l.category}</small></Link>)}</div>}
     {cursor && <button className="btn ghost block" disabled={loading} onClick={() => load(false)}>{loading ? 'Loading…' : 'Show more'}</button>}
@@ -54,7 +54,7 @@ export function NewListing() {
   const [d, setD] = useState({ title: '', price: '', currency: 'NGN', category: '', description: '' }); const [placeId, setPlaceId] = useState<number | null>(null);
   const [files, setFiles] = useState<File[]>([]); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof d) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setD({ ...d, [k]: e.target.value });
-  const addFiles = (fl: FileList | null) => { if (!fl) return; const ok = [...fl].filter((f) => f.type.startsWith('image/') && f.size <= 5 * 1024 * 1024); if (ok.length < fl.length) setErr('Some files were skipped (images up to 5 MB only).'); setFiles((x) => [...x, ...ok].slice(0, 6)); };
+  const addFiles = (fl: FileList | null) => { if (!fl) return; const ok = [...fl].filter((f) => f.type.startsWith('image/') && f.size <= 15 * 1024 * 1024); if (ok.length < fl.length) setErr('Some files were skipped (images up to 15 MB only).'); setFiles((x) => [...x, ...ok].slice(0, 6)); };
   async function submit(e: FormEvent) {
     e.preventDefault(); setErr('');
     if (!files.length) return setErr('Add at least one photo');
@@ -99,4 +99,9 @@ export function ListingView() {
         </div> : <Link className="btn primary block" to={`/u/${l.seller.username}`}>Contact seller</Link>}
       </div>
     </div></div>;
+}
+
+function catEmoji(c: string) {
+  const m: [RegExp, string][] = [[/phone|electron|computer|tech/i, '📱'], [/vehicle|car|auto/i, '🚗'], [/home|furn|garden/i, '🛋️'], [/fashion|cloth|wear/i, '👗'], [/property|rent|house/i, '🏠'], [/baby|kid|toy/i, '🧸'], [/sport|fitness/i, '⚽'], [/beauty|health/i, '💄'], [/job|service/i, '🛠️'], [/food|grocer/i, '🍲'], [/book|music|hobb/i, '🎸'], [/pet/i, '🐶']];
+  return m.find(([r]) => r.test(c))?.[1] || '🏷️';
 }

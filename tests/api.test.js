@@ -205,13 +205,13 @@ test('avatar / cover upload with validation', async () => {
   let r = await post(A, '/api/me/avatar').attach('image', png, { filename: 'a.png', contentType: 'image/png' });
   assert.equal(r.status, 200); assert.match(r.body.avatar_path, /^\/uploads\/avatar\/[a-f0-9]+\.webp$/);
   const img = await request(app).get(r.body.avatar_path); assert.equal(img.status, 200);
-  assert.equal((await sharp(img.body).metadata()).width, 400);
+  assert.equal((await sharp(img.body).metadata()).width, 800);
   r = await post(A, '/api/me/cover').attach('image', png, { filename: 'c.png', contentType: 'image/png' }); assert.equal(r.status, 200);
   r = await post(A, '/api/me/avatar').attach('image', Buffer.from('<?php echo 1; ?>'), { filename: 'x.png', contentType: 'image/png' });
   assert.equal(r.status, 400, 'fake image rejected');
   r = await post(A, '/api/me/avatar').attach('image', Buffer.from('hi'), { filename: 'x.txt', contentType: 'text/plain' });
   assert.equal(r.status, 400);
-  r = await post(A, '/api/me/avatar').attach('image', Buffer.alloc(5 * 1024 * 1024 + 10), { filename: 'big.png', contentType: 'image/png' });
+  r = await post(A, '/api/me/avatar').attach('image', Buffer.alloc(15 * 1024 * 1024 + 10), { filename: 'big.png', contentType: 'image/png' });
   assert.equal(r.status, 413);
 });
 
@@ -288,7 +288,7 @@ test('cursor pagination has no duplicates or gaps', async () => {
     seen.push(...r.body.items.map((p) => p.id)); cursor = r.body.next_cursor; pages++;
   } while (cursor && pages < 20);
   assert.equal(new Set(seen).size, seen.length);
-  const { rows } = await pool.query("SELECT count(*)::int n FROM posts WHERE visibility='public'");
+  const { rows } = await pool.query("SELECT count(*)::int n FROM posts WHERE visibility='public' AND deleted_at IS NULL");
   assert.equal(seen.length, rows[0].n);
 });
 

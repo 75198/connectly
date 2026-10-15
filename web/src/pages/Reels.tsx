@@ -3,9 +3,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, authorHref, Page, Post } from '../api';
 import { Avatar, Icon, Sheet, Spinner, VIS_LABEL } from '../components/ui';
 import { Comments } from '../components/PostCard';
+import { MediaStudio } from '../components/MediaStudio';
 
 const fmt = (n = 0) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
 const saveData = () => !!(navigator as any).connection?.saveData;
+// Slow network or Data Saver -> 480p rendition; otherwise the high-quality original.
+const slowNet = () => { const c = (navigator as any).connection; return !!c && (c.saveData || /(^|-)2g|3g/.test(c.effectiveType || '')); };
 
 // Full-screen vertical feed. Only the visible reel plays; its neighbours load metadata only, the rest load nothing.
 export function Reels() {
@@ -76,7 +79,7 @@ function ReelItem({ i, post, active, near, muted, onMute, onChange, onComments }
     try { await api('/reports', { json: { target_type: 'post', post_id: post.id, reason: reason.trim() } }); flash('Thanks. Our moderators will review it.'); } catch (e: any) { flash(e.message); }
   }
   return <section className="reel" data-i={i} aria-label={`Reel by ${post.author.full_name}`}>
-    <video ref={v} className="reelvideo" src={near ? post.video_path! : undefined} poster={post.poster_path || undefined} playsInline loop muted={muted}
+    <video ref={v} className="reelvideo" src={near ? ((slowNet() && post.video_low_path) || post.video_path!) : undefined} poster={post.poster_path || undefined} playsInline loop muted={muted}
       preload={active ? 'auto' : near && !saveData() ? 'metadata' : 'none'} onTimeUpdate={onTime} onClick={() => (muted ? onMute() : setPaused((p) => !p))} />
     {paused && active && <button className="reelplay" aria-label="Play" onClick={() => setPaused(false)}><Icon name="play" /></button>}
     <button className="reelmute btn icon reelbtn" aria-label={muted ? 'Unmute' : 'Mute'} onClick={onMute}><Icon name={muted ? 'mute' : 'volume'} /></button>
@@ -102,7 +105,9 @@ export function NewReel() {
   const [file, setFile] = useState<File | null>(null); const [preview, setPreview] = useState(''); const [secs, setSecs] = useState(0);
   const [body, setBody] = useState(''); const [vis, setVis] = useState<'public' | 'friends' | 'private'>('public');
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [pct, setPct] = useState(0);
+  const [studio, setStudio] = useState<null | 'camera' | 'cover'>(null); const [cover, setCover] = useState<File | null>(null); const [frame, setFrame] = useState<Blob | null>(null); const pv = useRef<HTMLVideoElement>(null);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  const grabFrame = () => { const v = pv.current; if (!v || !v.videoWidth) return; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d')!.drawImage(v, 0, 0); c.toBlob((b) => { if (b) { setFrame(b); setStudio('cover'); } }, 'image/jpeg', 0.95); };
   function pick(f?: File) {
     setErr(''); if (!f) return;
     if (!/^video\/(mp4|quicktime|webm|3gpp|x-m4v)$/.test(f.type)) return setErr('Choose an MP4, MOV, WebM or 3GP video');
@@ -113,7 +118,7 @@ export function NewReel() {
     e.preventDefault(); if (!file) return;
     if (secs > MAX_S + 0.5) return setErr(`Reels can be up to ${MAX_S} seconds long`);
     setBusy(true); setErr(''); setPct(0);
-    const fd = new FormData(); fd.append('body', body); fd.append('visibility', vis); fd.append('video', file);
+    const fd = new FormData(); fd.append('body', body); fd.append('visibility', vis); fd.append('video', file); if (cover) fd.append('cover', cover);
     // XHR (not fetch) so we can show upload progress on slow connections
     const x = new XMLHttpRequest(); x.open('POST', '/api/reels'); x.setRequestHeader('X-Connectly-CSRF', '1');
     x.upload.onprogress = (ev) => ev.lengthComputable && setPct(Math.round((ev.loaded / ev.total) * 100));
@@ -124,10 +129,14 @@ export function NewReel() {
   }
   return <div className="stack"><h1 className="pagetitle">New reel</h1>
     <form className="card stack" onSubmit={submit}>
-      {preview ? <video className="reelpreview" src={preview} controls playsInline muted onLoadedMetadata={(e) => setSecs(e.currentTarget.duration)} />
+      {preview ? <video ref={pv} className="reelpreview" src={preview} controls playsInline muted onLoadedMetadata={(e) => setSecs(e.currentTarget.duration)} />
         : <label className="reelpick"><Icon name="reel" /><b>Choose a video</b><span className="meta">Vertical works best · up to {MAX_S} seconds · {MAX_MB} MB</span>
           <input type="file" accept="video/mp4,video/quicktime,video/webm,video/3gpp" hidden onChange={(e) => pick(e.target.files?.[0])} /></label>}
-      {preview && <button type="button" className="linkish" onClick={() => { setFile(null); setPreview(''); setSecs(0); }}>Choose a different video</button>}
+      {!preview && <button type="button" className="btn ghost block" onClick={() => setStudio('camera')}>🎥 Record with camera</button>}
+      {preview && <div className="row wrap"><button type="button" className="btn ghost" onClick={grabFrame}>🖼️ {cover ? 'Change cover' : 'Set cover from this frame'}</button>{cover && <img className="coverthumb" src={URL.createObjectURL(cover)} alt="Cover" />}</div>}
+      {preview && <button type="button" className="linkish" onClick={() => { setFile(null); setPreview(''); setSecs(0); setCover(null); }}>Choose a different video</button>}
+      {studio && <MediaStudio allowVideo={studio === 'camera'} startWith={studio === 'camera' ? 'camera' : 'menu'} initial={studio === 'cover' ? frame : null} onClose={() => setStudio(null)}
+        onDone={(r) => { setStudio(null); if (r.file.type.startsWith('video/')) pick(r.file); else setCover(r.file); }} />}
       {secs > MAX_S + 0.5 && <p className="error">This video is {Math.round(secs)} seconds. Reels can be up to {MAX_S} seconds.</p>}
       <label>Caption<textarea value={body} onChange={(e) => setBody(e.target.value)} maxLength={2200} rows={3} /></label>
       <label>Who can see this<select value={vis} onChange={(e) => setVis(e.target.value as any)}>{(['public', 'friends', 'private'] as const).map((k) => <option key={k} value={k}>{VIS_LABEL[k]}</option>)}</select></label>

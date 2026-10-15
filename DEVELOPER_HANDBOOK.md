@@ -96,3 +96,25 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - Signup and onboarding screens stay full white with the logo at the top, with no step counters and no placeholder examples. The brand touch is a logo pop-in and an animated accent line.
 - After onboarding finishes, a one-time "Welcome, <first name>" screen (`web/src/pages/Welcome.tsx`, triggered with sessionStorage `cx-show-welcome`) shows highlights, then opens the Home feed.
 - Mobile screenshots: `python3 scripts/round5_screens.py http://localhost:3000 a.mp4 b.mp4` → `screenshots/round5/` (gitignored).
+
+## 11. Posts: composer, drafts, Recently deleted, reactions, saved, stories (round 5b, migration 009)
+- Composer (`components/Composer.tsx`): Home shows a "What's on your mind?" card that opens a sheet with Photo/video, Camera, Feeling, Location and audience (Public / Friends / Only me). Uploads use XHR (`uploadForm` in `api.ts`) to show `Posting… NN%`, then a success toast (`toast()` + `<Toaster/>` in `App.tsx`). Errors show inline and as a red toast. Choosing a video posts it as a reel.
+- Columns on `posts`: `is_draft`, `deleted_at`, `feeling`, `location_tag` (all with defaults that keep existing posts published). The `VISIBLE` SQL clause now also excludes drafts and deleted posts, so every read path hides them.
+- ⋯ menu on your own posts: Edit post, Save as draft (`POST /posts/:id/draft`), Save post, and Delete. Delete opens a confirmation ("Are you sure you want to delete this post?") that offers Edit or Move to Drafts instead.
+- `DELETE /posts/:id` is now a **soft delete** (`deleted_at`). Recently deleted (`GET /me/deleted`, `POST /posts/:id/restore`) keeps posts for 30 days. `startPurgeJob()` in `server/index.js` runs hourly (first run 30 s after start). It permanently removes posts deleted more than 30 days ago (and their files) plus stories that expired more than an hour ago. Drafts: `GET /me/drafts`, `POST /posts/:id/publish`. "Delete forever" (`DELETE /posts/:id/permanent`) only works on drafts and on posts already in Recently deleted. The UI for these lives at `/me/drafts`, `/me/deleted` and `/me/saved`, linked from the Profile hub.
+- Reactions: `post_likes.reaction` (like/love/haha/wow/sad/angry, default `like`). `PUT /posts/:id/like {reaction}`. Long-press or ☺ opens the reaction bar.
+- Saved posts: `saved_posts` table, `PUT|DELETE /posts/:id/save`, `GET /me/saved`. The share sheet offers native share, Copy link, WhatsApp, X, Facebook and Email (links only, no SDKs).
+- Stories: `stories` table, photo + caption, visible for 24 h to you, your friends and your followers (blocks respected). `GET/POST /stories`, `DELETE /stories/:id`.
+- Timestamps: `postTime()` shows Just now, 5m, 3h, Today 10:24 PM, Yesterday 9:10 AM, then the date, all in the viewer's local time. Edited posts show "Edited".
+- Theme: `users.theme_pref` (light / dark / system, default system), set in Privacy and settings → Appearance and in Edit profile. It is stored on the device and on the account. Dark mode uses a true black background.
+- Pull-to-refresh on Home, skeleton loaders, page fade-ins, a tiny `haptic()` (navigator.vibrate) on reactions and posting, safe-area padding, and an installable PWA (manifest `id`, shortcuts, standalone display, service worker cache `cx-static-v3`).
+
+## 12. Media quality, camera and editor (round 5b, migration 010)
+- Photos: original resolution up to 4096 px (posts), 2560 px (listings), 1440x2560 (stories) and 800 px (avatars). Encoded as WebP q90 in sRGB with EXIF orientation applied; GPS and other metadata are dropped. The upload limit is 15 MB. Optional `enhance=1` (posts and stories) applies a gentle sharpen, contrast and saturation boost.
+- Reels produce two renditions. HQ keeps the original stream untouched (any resolution, including 4K) when it is already browser-safe H.264 8-bit with AAC or no audio in MP4/MOV. Otherwise it is re-encoded at CRF 19 with the original resolution, capped at 1080p on the short side. Data saver is 480p CRF 30 (`posts.video_low_path`). The client uses the 480p file when Data Saver is on or the connection is 2G/3G. An optional `cover` image (picked in the editor) becomes the poster. `posts.image_path` also points at the poster so caption-less reels satisfy the existing `posts` CHECK constraint.
+- `components/MediaStudio.tsx` is fully client-side. It includes:
+  - a camera (getUserMedia, front/rear switch, torch where supported, photo, or video up to 60 s via MediaRecorder);
+  - an editor with crop ratios, rotate, zoom, 10 filters, adjustments (brightness, contrast, saturation, warmth, sharpen, fade), auto-enhance, text, emoji stickers and drawing. Export is a 95% JPEG up to 4096 px, with the pixel maths in `applyAdjust` so it works without canvas `filter` support;
+  - an original SVG avatar maker.
+  It is used by the composer, stories, the reel cover and the profile photo.
+- Screenshots: `python3 scripts/round5b_screens.py http://localhost:3055 a.jpg b.jpg c.jpg` (light and dark) → `screenshots/round5/`.

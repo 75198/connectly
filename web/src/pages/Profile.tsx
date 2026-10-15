@@ -4,6 +4,7 @@ import { api, User } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon, Sheet } from '../components/ui';
 import { Composer } from '../components/Composer';
+import { MediaStudio } from '../components/MediaStudio';
 import { PostList, usePosts } from '../components/PostList';
 import { PlacePicker } from '../components/PlacePicker';
 
@@ -33,33 +34,39 @@ function FriendButtons({ u, onChange }: { u: User; onChange: (p: Partial<User>) 
 
 export function Profile() {
   const { username = '' } = useParams();
-  const [u, setU] = useState<User | null>(null); const [err, setErr] = useState('');
+  const [u, setU] = useState<User | null>(null); const [err, setErr] = useState(''); const [tab, setTab] = useState<'posts' | 'photos' | 'about'>('posts');
   const feed = usePosts(`/users/${encodeURIComponent(username)}/posts`);
   useEffect(() => { setU(null); setErr(''); api<User>(`/users/${encodeURIComponent(username)}`).then(setU).catch((e) => setErr(e.message)); }, [username]);
   if (err) return <div className="card empty">{err}</div>;
-  if (!u) return <div className="card empty"><div className="spinner" /></div>;
+  if (!u) return <div className="card profilehead skel" style={{ height: 360 }}><span className="sk block" /></div>;
   const work = [u.work_role, u.work_company].filter(Boolean).join(' at ');
+  const photos = feed.items.filter((p) => p.image_path || p.poster_path);
   return <div className="stack">
     <section className="card profilehead">
       <div className="cover" style={u.cover_path ? { backgroundImage: `url(${u.cover_path})` } : undefined} />
       <div className="pinfo">
         <div className="pav"><Avatar user={u} size={112} /></div>
-        <div className="grow"><h1>{u.full_name}</h1><div className="meta">@{u.username} · {u.friend_count} friend{u.friend_count === 1 ? '' : 's'} · {u.follower_count} follower{u.follower_count === 1 ? '' : 's'}</div></div>
-        {u.is_me && <Link className="btn ghost" to="/settings/profile"><Icon name="gear" /> Edit profile</Link>}
+        <h1>{u.full_name}</h1><div className="meta">@{u.username}{u.location ? ` · 📍 ${u.location}` : ''}</div>
+        {u.bio && <p className="pbiotext">{u.bio}</p>}
+        <div className="pstats"><span><b>{u.post_count ?? 0}</b><small>Posts</small></span><Link to={u.is_me ? '/friends' : '#'}><b>{u.friend_count ?? 0}</b><small>Friends</small></Link><span><b>{u.follower_count ?? 0}</b><small>Followers</small></span></div>
+        {u.is_me ? <div className="row pactions"><Link className="btn primary grow" to="/settings/profile"><Icon name="gear" /> Edit profile</Link><Link className="btn ghost" to="/me/saved" aria-label="Saved"><Icon name="bookmark" /></Link></div>
+          : <div className="pactions"><FriendButtons u={u} onChange={(p) => setU({ ...u, ...p })} /></div>}
       </div>
-      {!u.is_me && <div className="pbio"><FriendButtons u={u} onChange={(p) => setU({ ...u, ...p })} /></div>}
-      <div className="pbio details">
-        {u.bio && <p>{u.bio}</p>}
+      <nav className="ptabs">{(['posts', 'photos', 'about'] as const).map((t) => <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}</nav>
+    </section>
+    {tab === 'about' && <section className="card pbio details">
         {work && <p>💼 {work}</p>}
         {u.education && <p>🎓 {u.education}</p>}
         {u.location && <p>📍 Lives in {u.location}</p>}
         {u.hometown && <p>🏠 From {u.hometown}</p>}
         {u.relationship_status && <p>❤️ {u.relationship_status}</p>}
         {!!u.interests?.length && <div className="tags">{u.interests.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
-      </div>
-    </section>
-    {u.is_me && <Composer onPosted={(p) => feed.setItems((x) => [p, ...x])} />}
-    <PostList feed={feed} empty={u.is_me ? "You haven't posted yet." : 'No posts you can see yet.'} />
+        {!work && !u.education && !u.location && !u.hometown && !u.relationship_status && !u.interests?.length && <p className="meta">No details shared yet.</p>}
+    </section>}
+    {tab === 'photos' && (photos.length ? <div className="photogrid">{photos.map((p) => <Link key={p.id} to={p.kind === 'reel' ? `/reels/${p.id}` : `/post/${p.id}`}><img src={(p.kind === 'reel' ? p.poster_path : p.image_path)!} alt="" loading="lazy" />{p.kind === 'reel' && <i>▶</i>}</Link>)}</div> : <p className="card empty">No photos yet.</p>)}
+    {tab === 'posts' && <>
+      {u.is_me && <Composer onPosted={(p) => feed.setItems((x) => [p, ...x])} />}
+      <PostList feed={feed} empty={u.is_me ? "You haven't posted yet." : 'No posts you can see yet.'} /></>}
   </div>;
 }
 
@@ -87,9 +94,10 @@ export function EditProfile() {
     if (place.hometown !== undefined) body.hometown_place_id = place.hometown;
     try { await api('/me', { method: 'PATCH', json: body }); await refresh(); setMsg('Profile saved'); } catch (x: any) { setErr(x.message); } finally { setBusy(''); }
   }
+  const [studio, setStudio] = useState(false); const { themePref, setThemePref } = useSession();
   async function upload(kind: 'avatar' | 'cover', f?: File) {
     if (!f) return; setErr(''); setMsg('');
-    if (f.size > 5 * 1024 * 1024) return setErr('Image must be 5 MB or smaller');
+    if (f.size > 15 * 1024 * 1024) return setErr('Image must be 15 MB or smaller');
     const fd = new FormData(); fd.append('image', f); setBusy(kind);
     try { await api(`/me/${kind}`, { form: fd }); await refresh(); setMsg(kind === 'avatar' ? 'Profile photo updated' : 'Cover photo updated'); } catch (x: any) { setErr(x.message); } finally { setBusy(''); }
   }
@@ -100,11 +108,14 @@ export function EditProfile() {
       <div className="cover small" style={me.cover_path ? { backgroundImage: `url(${me.cover_path})` } : undefined} />
       <div className="row wrap">
         <Avatar user={me} size={72} />
+        <button type="button" className="btn ghost" onClick={() => setStudio(true)}>📷 Camera, editor or avatar</button>
         <label className="btn ghost">{busy === 'avatar' ? 'Uploading…' : 'Change profile photo'}<input type="file" accept="image/*" hidden onChange={(e) => upload('avatar', e.target.files?.[0])} /></label>
         <label className="btn ghost">{busy === 'cover' ? 'Uploading…' : 'Change cover photo'}<input type="file" accept="image/*" hidden onChange={(e) => upload('cover', e.target.files?.[0])} /></label>
       </div>
-      <small className="meta">JPEG, PNG, WebP or GIF up to 5 MB.</small>
+      <small className="meta">JPEG, PNG, WebP or GIF up to 15 MB.</small>
+      {studio && <MediaStudio onClose={() => setStudio(false)} onDone={(r) => { setStudio(false); upload('avatar', r.file); }} />}
     </section>
+    <section className="card"><h3>Appearance</h3><div className="segmented">{(['light', 'dark', 'system'] as const).map((k) => <button type="button" key={k} className={themePref === k ? 'on' : ''} onClick={() => setThemePref(k)}>{k === 'light' ? '☀️ Light' : k === 'dark' ? '🌙 Dark' : '⚙️ System'}</button>)}</div></section>
     <form className="card stack" onSubmit={save}>
       <label>Full name<input value={d.full_name} onChange={set('full_name')} maxLength={80} required autoComplete="name" /></label>
       <label>Username<input value={d.username} onChange={(e) => setD({ ...d, username: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} minLength={3} maxLength={20} required autoCapitalize="none" /><span className="hint">Your profile link: /u/{d.username || 'username'}</span></label>

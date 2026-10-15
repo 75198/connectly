@@ -1,6 +1,6 @@
 // Connectly service worker: caches the app shell + hashed static assets for fast repeat loads on slow networks.
 // API responses are never cached.
-const CACHE = 'cx-static-v2';
+const CACHE = 'cx-static-v3';
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/logo.svg', '/manifest.webmanifest']))); });
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {

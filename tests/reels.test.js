@@ -48,6 +48,7 @@ test('upload a reel: transcoded, poster generated, appears in reels feed but not
   assert.ok(r.body.video_seconds > 1 && r.body.video_seconds < 3);
   assert.ok(fs.existsSync(path.join(config.uploadDir, r.body.video_path.slice(9))));
   const v = await A.get(r.body.video_path); assert.equal(v.status, 200);
+  assert.match(r.body.video_low_path, /-480\.mp4$/); assert.equal((await A.get(r.body.video_low_path)).status, 200);
   const rid = r.body.id;
   r = await B.get('/api/reels'); assert.deepEqual(r.body.items.map((x) => x.id), [rid]);
   r = await B.get('/api/feed'); assert.equal(r.body.items.length, 0);
@@ -80,4 +81,18 @@ test('rejects long, non-video and wrong-type uploads', async () => {
 test('feature flag off hides reels API', async () => {
   config.features.reels = false;
   try { const r = await A.get('/api/reels'); assert.equal(r.status, 404); } finally { config.features.reels = true; }
+});
+
+test('reel with a custom cover from the editor; original h264 is kept without re-encode', async () => {
+  const sharp = (await import('sharp')).default;
+  const cover = await sharp({ create: { width: 360, height: 640, channels: 3, background: '#ff3366' } }).jpeg().toBuffer();
+  const src = path.join(os.tmpdir(), 'cxr-copy.mp4');
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x568:rate=10:duration=1', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', src]);
+  const r = await A.post('/api/reels').set(H).attach('video', src, { contentType: 'video/mp4' }).attach('cover', cover, { filename: 'c.jpg', contentType: 'image/jpeg' });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const poster = await sharp(path.join(config.uploadDir, r.body.poster_path.slice(9))).stats();
+  assert.ok(poster.channels[0].mean > 200, 'poster is the custom (red) cover');
+  const same = fs.readFileSync(path.join(config.uploadDir, r.body.video_path.slice(9)));
+  const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'json', path.join(config.uploadDir, r.body.video_path.slice(9))]).toString());
+  assert.equal(probe.streams[0].width, 320, 'original resolution kept'); assert.ok(same.length > 0);
 });

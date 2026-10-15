@@ -36,9 +36,16 @@ const Hero = lazy(() => import('./pages/Hero').then((m) => ({ default: m.Hero })
 const Welcome = lazy(() => import('./pages/Welcome').then((m) => ({ default: m.Welcome })));
 const Reels = lazy(() => import('./pages/Reels').then((m) => ({ default: m.Reels })));
 const NewReel = lazy(() => import('./pages/Reels').then((m) => ({ default: m.NewReel })));
+const MyPosts = lazy(() => import('./pages/MyPosts').then((m) => ({ default: m.MyPosts })));
 const Search = lazy(() => import('./pages/Search').then((m) => ({ default: m.Search })));
 
-export function App() { return <SessionProvider><Router /></SessionProvider>; }
+export function App() { return <SessionProvider><Router /><Toaster /></SessionProvider>; }
+
+function Toaster() {
+  const [t, setT] = useState<{ text: string; kind: string; id: number } | null>(null);
+  useEffect(() => { let timer = 0; const f = (e: Event) => { const d = (e as CustomEvent).detail; setT({ ...d, id: Date.now() }); clearTimeout(timer); timer = window.setTimeout(() => setT(null), 3200); }; window.addEventListener('cx-toast', f); return () => window.removeEventListener('cx-toast', f); }, []);
+  return <div className="toastwrap" role="status" aria-live="polite">{t && <div key={t.id} className={`toast ${t.kind}`}>{t.kind === 'err' ? '⚠️' : '✓'} {t.text}</div>}</div>;
+}
 
 const Loading = () => <div className="splash"><div className="spinner" /></div>;
 
@@ -63,7 +70,7 @@ function Router() {
     <Route path="/" element={<Feed />} /><Route path="/compose" element={<Compose />} /><Route path="/search" element={<Search />} /><Route path="/reels/new" element={<NewReel />} />
     <Route path="/u/:username" element={<Profile />} /><Route path="/settings" element={<Settings />} />
     <Route path="/settings/profile" element={<EditProfile />} /><Route path="/settings/:section" element={<SettingsSection />} />
-    <Route path="/me" element={<Hub />} /><Route path="/notifications" element={<Notifications />} /><Route path="/friends" element={<Friends />} />
+    <Route path="/me" element={<Hub />} /><Route path="/me/:tab" element={<MyPosts />} /><Route path="/notifications" element={<Notifications />} /><Route path="/friends" element={<Friends />} />
     <Route path="/post/:id" element={<PostPage />} /><Route path="/create/:kind" element={<CreateSpace />} /><Route path="/s/:slug" element={<SpaceView />} />
     <Route path="/market" element={<Market />} /><Route path="/market/new" element={<NewListing />} /><Route path="/market/:id" element={<ListingView />} />
     {me.roles?.includes('admin') && <Route path="/admin" element={<Admin />} />}

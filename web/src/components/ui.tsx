@@ -13,7 +13,7 @@ export function Avatar({ user, size = 40 }: { user: Pick<Author, 'full_name' | '
 export function UserLink({ user }: { user: Author }) {
   return <Link to={authorHref(user)} className="ulink">{user.full_name}</Link>;
 }
-export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' | 'search' | 'bell' | 'pin' | 'shop' | 'flag' | 'x' | 'back' | 'chev' | 'reel' | 'share' | 'eye' | 'volume' | 'mute' | 'play' }) {
+export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' | 'search' | 'bell' | 'pin' | 'shop' | 'flag' | 'x' | 'back' | 'chev' | 'reel' | 'share' | 'eye' | 'volume' | 'mute' | 'play' | 'bookmark' | 'clock' | 'trash' | 'sliders' }) {
   const p: Record<string, JSX.Element> = {
     home: <path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z" />,
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
@@ -44,6 +44,10 @@ export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shie
     volume: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16 9a4 4 0 010 6M18.5 6.5a7.5 7.5 0 010 11" /></>,
     mute: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 9l5 6M22 9l-5 6" /></>,
     play: <path fill="currentColor" d="M8 5v14l11-7z" />,
+    bookmark: <path d="M6 3h12v18l-6-4-6 4z" />,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    trash: <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></>,
+    sliders: <><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></>,
     more: <><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></>,
   };
   return <svg className="icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{p[name]}</svg>;
@@ -57,3 +61,9 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
   </div>;
 }
 export function Spinner() { return <div className="spinner" aria-label="Loading" />; }
+export function PostSkeleton({ n = 2 }: { n?: number }) {
+  return <>{Array.from({ length: n }, (_, i) => <div key={i} className="card post skel" aria-hidden><div className="row"><span className="sk circle" /><span className="grow"><span className="sk line w40" /><span className="sk line w20" /></span></div><span className="sk line" /><span className="sk line w80" /><span className="sk block" /></div>)}</>;
+}
+export function ListSkeleton({ n = 5 }: { n?: number }) {
+  return <div className="card list" aria-hidden>{Array.from({ length: n }, (_, i) => <div key={i} className="row skrow"><span className="sk circle" /><span className="grow"><span className="sk line w60" /><span className="sk line w30" /></span></div>)}</div>;
+}
