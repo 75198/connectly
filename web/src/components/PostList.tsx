@@ -35,7 +35,7 @@ export function PostList({ feed, empty, mode, interleave }: { feed: ReturnType<t
   return <>
     {items.map((p, i) => <Fragment key={p.id}><PostCard mode={mode} post={p} onChange={(np) => setItems((xs) => xs.map((x) => x.id === np.id ? np : x))} onDelete={(id) => setItems((xs) => xs.filter((x) => x.id !== id))} />{interleave?.(i)}</Fragment>)}
     {err && <p className="error card">{err}</p>}
-    {!loading && done && items.length === 0 && <p className="card empty">{empty}</p>}
+    {!loading && done && items.length === 0 && empty && <p className="card empty">{empty}</p>}
     {loading && (items.length ? <div className="spinner" aria-label="Loading" /> : <PostSkeleton n={3} />)}
     {!done && !loading && (err || !hasIO) && <button className="btn ghost block" onClick={() => load()}>{err ? 'Try again' : 'Load more'}</button>}
     <div ref={sentinel} className="sentinel" />

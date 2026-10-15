@@ -177,3 +177,15 @@ input,textarea{font-size:max(16px,1rem)}
 .presencedot{width:9px;height:9px;border-radius:50%;background:#22C55E;display:inline-block;margin-inline-end:4px}
 .newpill{position:sticky;top:calc(64px + env(safe-area-inset-top));z-index:6;align-self:center;border:0;border-radius:999px;padding:9px 18px;background:var(--aigrad);color:#fff;font:inherit;font-weight:800;box-shadow:0 6px 20px rgba(139,92,246,.4);cursor:pointer;animation:aiin .25s}
 .approx{display:block;font-weight:600}
+/* Mobile overflow guard: nothing may be wider than the screen. */
+html, body, #root { overflow-x: hidden; max-width: 100%; }
+html, body { overscroll-behavior-x: none; }
+img, video, iframe, canvas { max-width: 100%; }
+.topbar { min-width: 0; max-width: 100vw; box-sizing: border-box; gap: 6px; }
+.topbar > a { min-width: 0; flex-shrink: 1; overflow: hidden; }
+.topbar .logo { min-width: 0; }
+.topbar .logo b { font-size: 1.25rem; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.topbar .topicons { flex-shrink: 0; gap: clamp(0px, 1vw, 6px); flex-wrap: nowrap; }
+.topbar .topicons .btn.icon, .topbar .topicons > a { width: 40px; height: 40px; min-width: 40px; padding: 0; display: inline-grid; place-items: center; }
+@media (max-width: 359px) { .topbar .logo b { display: none; } }
+.stack, .card { min-width: 0; }

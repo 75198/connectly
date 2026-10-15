@@ -3,7 +3,6 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-route
 import { SessionProvider, useSession } from './session';
 import { Icon, Logo, Avatar } from './components/ui';
 import { api, getFeatures } from './api';
-import { StreakChip } from './pages/Discover';
 import { WELCOME_KEY } from './pages/Welcome';
 import { I18nProvider, useT } from './lib/i18n';
 import { sfx } from './lib/sounds';
@@ -136,7 +135,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   const loc = useLocation(); const home = loc.pathname === '/';
   return <div className={`layout ${home ? 'home' : 'sub'}`}>
     {home && <header className="topbar"><NavLink to="/"><Logo size={30} /></NavLink>
-      <span className="row"><StreakChip /><AiLink /><ReelsLink /><Dm /><Bell /><button className="btn icon ghost" onClick={toggleTheme} aria-label="Toggle dark mode"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button></span></header>}
+      <span className="row topicons"><AiLink /><ReelsLink /><Dm /><Bell /></span></header>}
     <aside className="sidebar">
       <NavLink to="/" className="brandlink"><Logo size={36} /></NavLink>
       <nav>{items.map((i) => <NavLink key={i.to} to={i.to} end={i.end} className={i.create ? 'createlink' : ''}><Icon name={i.icon} /><span>{i.label}</span></NavLink>)}
