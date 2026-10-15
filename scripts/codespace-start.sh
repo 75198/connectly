@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
 # (Re)starts Connectly inside a Codespace: Postgres + build + migrations + seed + server on :3000.
+# Safe to run repeatedly. No sudo needed: Postgres runs as the current user, data in ~/pgdata, localhost only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-sudo service postgresql start >/dev/null
-sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='connectly'" | grep -q 1 || {
+PGBIN=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
+export PGDATA="$HOME/pgdata"
+umask 077
+if [ ! -s "$PGDATA/PG_VERSION" ]; then
+  openssl rand -hex 16 > "$HOME/.pg_superuser_pw"
+  "$PGBIN/initdb" -D "$PGDATA" -U postgres --auth=scram-sha-256 --pwfile="$HOME/.pg_superuser_pw" >/dev/null
+fi
+"$PGBIN/pg_ctl" -D "$PGDATA" status >/dev/null 2>&1 || \
+  "$PGBIN/pg_ctl" -D "$PGDATA" -l "$HOME/pg.log" -w -o "-c listen_addresses=localhost -k /tmp" start >/dev/null
+export PGPASSWORD=$(cat "$HOME/.pg_superuser_pw")
+PSQL="$PGBIN/psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q"
+touch .env
+if ! $PSQL -tc "SELECT 1 FROM pg_roles WHERE rolname='connectly'" | grep -q 1; then
   PW=$(openssl rand -hex 16)
-  sudo -u postgres psql -c "CREATE USER connectly WITH PASSWORD '$PW'" >/dev/null
-  sudo -u postgres psql -c "CREATE DATABASE connectly OWNER connectly" >/dev/null
-  echo "DATABASE_URL=postgres://connectly:$PW@localhost:5432/connectly" > .env
-}
-if ! grep -q APP_URL .env; then
+  $PSQL -c "CREATE USER connectly WITH PASSWORD '$PW'"
+  $PSQL -c "CREATE DATABASE connectly OWNER connectly"
+  sed -i '/^DATABASE_URL=/d' .env
+  echo "DATABASE_URL=postgres://connectly:$PW@localhost:5432/connectly" >> .env
+fi
+unset PGPASSWORD
+if ! grep -q '^APP_URL=' .env; then
   echo "APP_URL=https://${CODESPACE_NAME}-3000.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}" >> .env
   printf 'PORT=3000\nNODE_ENV=production\nCOOKIE_SECURE=true\nUPLOAD_DIR=./uploads\n' >> .env
 fi
