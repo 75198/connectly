@@ -10,8 +10,10 @@ import { issueCode, consumeCode, CODE_ERRORS } from './codes.js';
 import { parseIdentifier, identCol } from './identity.js';
 import { smsConfigured } from './sms.js';
 import { config } from './config.js';
+import { pushTo } from './push.js';
 
 const EMAIL_TYPES = { friend_request: (a) => [`${a} sent you a friend request`, `${a} wants to be friends on Connectly.`], friend_accept: (a) => [`${a} accepted your friend request`, `You and ${a} are now friends on Connectly.`] };
+const PUSH_TEXT = { like: 'reacted to your post', comment: 'commented on your post', reply: 'replied to your comment', follow: 'started following you', follow_request: 'requested to follow you', follow_accept: 'accepted your follow request', mention: 'mentioned you', live: 'is live now', event_reminder: 'has an event starting soon', event_going: 'is going to your event', remix: 'remixed your reel', verified_approved: 'approved your verified badge', verified_rejected: 'reviewed your verified badge request' };
 // Creates an in-app notification (if enabled) and sends email for friend events (if enabled). Never throws.
 export async function notify(userId, actorId, type, extra = {}) {
   try {
@@ -20,6 +22,7 @@ export async function notify(userId, actorId, type, extra = {}) {
       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = u.id AND b.blocked_id = a.id) OR (b.blocker_id = a.id AND b.blocked_id = u.id))`, [userId, actorId]);
     const u = rows[0]; if (!u) return;
     if (u.inapp_notifications) await q('INSERT INTO notifications (user_id, actor_id, type, post_id, comment_id, space_id, live_stream_id) VALUES ($1,$2,$3,$4,$5,$6,$7)', [userId, actorId, type, extra.post_id || null, extra.comment_id || null, extra.space_id || null, extra.live_stream_id || null]);
+    if (u.inapp_notifications) pushTo(userId, { title: 'Connectly', body: `${u.actor_name} ${PUSH_TEXT[type] || 'sent you a notification'}`, url: extra.post_id ? `/post/${extra.post_id}` : '/notifications', tag: type });
     if (EMAIL_TYPES[type] && u.email && u.email_notifications) {
       const [subject, line] = EMAIL_TYPES[type](u.actor_name);
       await sendMail({ to: u.email, subject, text: `${line}\n\nOpen Connectly: ${config.appUrl}/friends\n\nYou can turn off email notifications in Privacy and settings > Notifications.` });
@@ -96,6 +99,15 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
       const { rows: [d] } = await q("SELECT count(*)::int AS n FROM follows WHERE follower_id = $1 AND created_at > now() - interval '24 hours'", [req.user.id]);
       if (d.n >= (config.followDailyLimit ?? 500)) return res.status(429).json({ error: 'You’ve followed a lot of people today. Take a rest and try again tomorrow.', limit: 'follows' });
     }
+    if (!already && config.features.privateAccounts) {
+      const { rows: [t] } = await q('SELECT is_private FROM users WHERE id = $1', [u.id]);
+      if (t?.is_private) {
+        const fr = await q('INSERT INTO follow_requests (requester_id, target_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.user.id, u.id]);
+        if (fr.rowCount) await notify(u.id, req.user.id, 'follow_request');
+        const { rows: [c0] } = await q('SELECT count(*)::int AS n FROM follows WHERE followee_id = $1', [u.id]);
+        return res.json({ following: false, requested: true, follower_count: c0.n });
+      }
+    }
     const r = await q('INSERT INTO follows (follower_id, followee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, u.id]);
     if (r.rowCount) await notify(u.id, req.user.id, 'follow');
     const { rows: [c] } = await q('SELECT count(*)::int AS n FROM follows WHERE followee_id = $1', [u.id]);
@@ -104,13 +116,15 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
   api.delete('/users/:username/follow', requireAuth, async (req, res) => {
     const u = await userBy(req.params.username, req.user.id);
     await q('DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2', [req.user.id, u.id]);
+    await q('DELETE FROM follow_requests WHERE requester_id = $1 AND target_id = $2', [req.user.id, u.id]);
     const { rows: [c] } = await q('SELECT count(*)::int AS n FROM follows WHERE followee_id = $1', [u.id]);
     res.json({ following: false, follower_count: c.n });
   });
   // Followers / following lists (blocked and deactivated accounts hidden). following_by_me lets the UI show Follow buttons.
   for (const list of ['followers', 'following']) api.get(`/users/:username/${list}`, requireAuth, async (req, res) => {
-    const { rows: [u] } = await q('SELECT id FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL', [req.params.username]);
+    const { rows: [u] } = await q('SELECT id, hide_follow_lists, is_private FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL', [req.params.username]);
     if (!u) return res.status(404).json({ error: 'User not found' });
+    if (u.id !== req.user.id && ((config.features.hideLists && u.hide_follow_lists) || (u.is_private && !(await q('SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2', [req.user.id, u.id])).rowCount))) return res.json({ items: [], hidden: true });
     const [me, other] = list === 'followers' ? ['f.followee_id', 'f.follower_id'] : ['f.follower_id', 'f.followee_id'];
     const { rows } = await q(`SELECT x.id, x.username, x.full_name, x.avatar_path, x.bio,
         EXISTS (SELECT 1 FROM follows m WHERE m.follower_id = $2 AND m.followee_id = x.id) AS following, (x.id = $2) AS is_me

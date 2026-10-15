@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api';
+import { api, useFeatures } from '../api';
+import { Avatar } from '../components/ui';
 import { useSession } from '../session';
 import { AdminLive } from '../components/LiveRow';
 import { AdminPlans } from './Plans';
@@ -20,7 +21,7 @@ export function Admin() {
   useEffect(() => { load(); }, []);
   if (!me?.roles?.includes('admin')) return <div className="card empty">Admins only.</div>;
   const setRole = async (u: AU, role: string, on: boolean) => { try { await api(on ? `/admin/users/${u.id}/roles` : `/admin/users/${u.id}/roles/${role}`, on ? { json: { role } } : { method: 'DELETE' }); load(); } catch (e: any) { setErr(e.message); } };
-  return <div className="stack"><AdminLive />{subs && <AdminPlans />}
+  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminExtras users={users} />
     <h1 className="pagetitle">Admin</h1>
     {err && <p className="error card">{err}</p>}
     {status && <section className="card"><h3>Email delivery</h3><p className={status.smtp_configured ? 'success' : 'notice'}>{status.note}</p></section>}
@@ -47,4 +48,33 @@ export function Admin() {
       </tbody></table></div>
     </section>
   </div>;
+}
+
+type VReq = { id: number; category: string; reason: string; created_at: string; user: { id: number; username: string; full_name: string; avatar_path: string | null; followers: number } };
+function AdminExtras({ users }: { users: AU[] }) {
+  const ff = useFeatures(); const [reqs, setReqs] = useState<VReq[]>([]); const [who, setWho] = useState(''); const [amt, setAmt] = useState('100'); const [msg, setMsg] = useState('');
+  const load = () => { if (ff?.verified) api<{ items: VReq[] }>('/admin/verification').then((r) => setReqs(r.items)).catch(() => {}); };
+  useEffect(load, [ff?.verified]);
+  if (!ff?.verified && !ff?.gifts) return null;
+  const target = users.find((u) => u.username.toLowerCase() === who.trim().replace(/^@/, '').toLowerCase());
+  const run = async (path: string, json: unknown, ok: string) => { setMsg(''); try { await api(path, { json }); setMsg(ok); load(); } catch (e: any) { setMsg(e.message); } };
+  return <>
+    {ff?.verified && <section className="card stack"><h3>Verification requests</h3>
+      {reqs.length === 0 ? <p className="meta">No pending requests.</p> : reqs.map((r) => <div key={r.id} className="row wrap vreq">
+        <Link to={`/u/${r.user.username}`} className="row grow"><Avatar user={r.user} size={36} /><span><b>{r.user.full_name}</b><br /><small className="meta">@{r.user.username} · {r.category} · {r.user.followers} followers</small></span></Link>
+        <p className="meta full">{r.reason}</p>
+        <button className="btn primary" onClick={() => run(`/admin/verification/${r.id}`, { decision: 'approve' }, `Verified @${r.user.username}`)}>Approve</button>
+        <button className="btn ghost" onClick={() => run(`/admin/verification/${r.id}`, { decision: 'reject' }, 'Request declined')}>Decline</button></div>)}
+    </section>}
+    <section className="card stack"><h3>Account tools</h3>
+      <input value={who} onChange={(e) => setWho(e.target.value)} placeholder="Username" aria-label="Username" list="adminusers" />
+      <datalist id="adminusers">{users.map((u) => <option key={u.id} value={u.username} />)}</datalist>
+      <div className="row wrap">
+        {ff?.verified && <><button className="btn ghost" disabled={!target} onClick={() => target && run(`/admin/users/${target.id}/verified`, { verified: true }, 'Badge added')}>Give verified badge</button>
+          <button className="btn ghost" disabled={!target} onClick={() => target && run(`/admin/users/${target.id}/verified`, { verified: false }, 'Badge removed')}>Remove badge</button></>}
+        {ff?.gifts && <><input className="narrow" type="number" min={1} value={amt} onChange={(e) => setAmt(e.target.value)} aria-label="Coins" />
+          <button className="btn ghost" disabled={!target || !(Number(amt) > 0)} onClick={() => target && run(`/admin/users/${target.id}/coins`, { amount: Math.floor(Number(amt)) }, 'Coins granted')}>Grant coins</button></>}
+      </div>
+      {msg && <p className="meta" role="status">{msg}</p>}
+    </section></>;
 }

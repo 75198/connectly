@@ -3,6 +3,9 @@ import { FEELINGS, Post, api, feelingEmoji, getFeatures, haptic, toast, uploadFo
 import { useSession } from '../session';
 import { Avatar, Icon, Sheet } from './ui';
 import { MediaStudio } from './MediaStudio';
+import { MusicPicker } from './MusicPicker';
+import { sfx } from '../lib/sounds';
+import type { Track } from '../api';
 
 type Vis = 'public' | 'friends' | 'private';
 const AUD: { k: Vis; label: string; icon: 'globe' | 'users' | 'lock'; hint: string }[] = [
@@ -27,13 +30,16 @@ export function Composer({ onPosted, autoFocus, spaceId }: { onPosted: (p: Post)
   </>;
 }
 
-export function ComposerForm({ onPosted, spaceId }: { onPosted: (p: Post, published: boolean) => void; spaceId?: number }) {
+export function ComposerForm({ onPosted, spaceId, initialText = '' }: { onPosted: (p: Post, published: boolean) => void; spaceId?: number; initialText?: string }) {
   const { me } = useSession();
-  const [body, setBody] = useState('');
+  const [body, setBody] = useState(initialText);
+  const [ff, setFf] = useState<any>({}); useEffect(() => { getFeatures().then(setFf); }, []);
+  const [cfOnly, setCfOnly] = useState(false);
+  const [poll, setPoll] = useState<string[] | null>(null); const [pollQ, setPollQ] = useState(''); const [when, setWhen] = useState(''); const [track, setTrack] = useState<Track | null>(null); const [musicOpen, setMusicOpen] = useState(false); const [hideLikes, setHideLikes] = useState(false);
   const [vis, setVis] = useState<Vis>(me?.default_post_visibility || 'public');
   const [file, setFile] = useState<File | null>(null); const [preview, setPreview] = useState<string | null>(null);
   const [feeling, setFeeling] = useState(''); const [place, setPlace] = useState('');
-  const [panel, setPanel] = useState<'' | 'feeling' | 'place' | 'audience' | 'ai'>('');
+  const [panel, setPanel] = useState<'' | 'feeling' | 'place' | 'audience' | 'ai' | 'schedule'>('');
   const [aiOn, setAiOn] = useState(false); const [aiPrompt, setAiPrompt] = useState(''); const [aiBusy, setAiBusy] = useState(false);
   useEffect(() => { getFeatures().then((f) => setAiOn(!!f.ai_support)); }, []);
   const aiWrite = async () => { const prompt = aiPrompt.trim() || 'Improve my draft'; setAiBusy(true);
@@ -53,23 +59,25 @@ export function ComposerForm({ onPosted, spaceId }: { onPosted: (p: Post, publis
   };
   async function submit(e: FormEvent | null, draft = false) {
     e?.preventDefault(); setErr('');
-    if (!body.trim() && !file) return setErr('Write something or add a photo.');
+    if (poll && (!pollQ.trim() || poll.filter((o) => o.trim()).length < 2)) return setErr('Add a question and at least two options.');
+    if (!body.trim() && !file && !poll) return setErr('Write something or add a photo.');
     if (draft && isVideo) return setErr('Videos can’t be saved as drafts yet.');
     setBusy(draft ? 'draft' : 'post'); setPct(0);
     try {
       let p: Post;
       if (isVideo) {
-        const fd = new FormData(); fd.append('body', body); fd.append('visibility', vis); fd.append('video', file!);
+        const fd = new FormData(); fd.append('body', body); fd.append('visibility', vis); if (track) fd.append('music_track_id', String(track.id)); fd.append('video', file!);
         p = await uploadForm<Post>('/reels', fd, setPct);
       } else {
-        const fd = new FormData(); fd.append('body', body); fd.append('visibility', vis);
+        const fd = new FormData(); fd.append('body', body || (poll ? pollQ : '')); fd.append('visibility', vis); if (cfOnly) fd.append('close_friends', '1');
+        if (poll) fd.append('poll', JSON.stringify({ question: pollQ.trim(), options: poll.map((o) => o.trim()).filter(Boolean) })); if (when && !draft) fd.append('scheduled_for', new Date(when).toISOString()); if (track) fd.append('music_track_id', String(track.id)); if (hideLikes) fd.append('hide_like_count', '1');
         if (feeling) fd.append('feeling', feeling); if (place.trim()) fd.append('location_tag', place.trim());
         if (draft) fd.append('as_draft', '1'); if (enhance) fd.append('enhance', '1'); if (spaceId) fd.append('space_id', String(spaceId)); if (file) fd.append('image', file);
         p = await uploadForm<Post>('/posts', fd, setPct);
       }
-      haptic(15);
-      toast(draft ? 'Saved to Drafts' : isVideo ? 'Your reel is live' : 'Your post is live');
-      setBody(''); setFile(null); setFeeling(''); setPlace(''); if (input.current) input.current.value = '';
+      haptic(15); sfx('posted');
+      toast(draft ? 'Saved to Drafts' : when ? 'Scheduled' : isVideo ? 'Your reel is live' : 'Your post is live');
+      setPoll(null); setPollQ(''); setWhen(''); setTrack(null); setBody(''); setFile(null); setFeeling(''); setPlace(''); if (input.current) input.current.value = '';
       onPosted(p, !draft && !isVideo);
     } catch (x: any) { setErr(x.message); toast(x.message, 'err'); } finally { setBusy(''); }
   }
@@ -88,23 +96,34 @@ export function ComposerForm({ onPosted, spaceId }: { onPosted: (p: Post, publis
     {panel === 'audience' && <div className="optpanel" role="radiogroup" aria-label="Audience">{AUD.map((a) => <button type="button" key={a.k} role="radio" aria-checked={vis === a.k} className={`optrow ${vis === a.k ? 'on' : ''}`} onClick={() => { setVis(a.k); setPanel(''); }}>
       <span className="opticon"><Icon name={a.icon} /></span><span className="grow"><b>{a.label}</b><small className="meta">{a.hint}</small></span>{vis === a.k && '✓'}</button>)}</div>}
     {panel === 'ai' && <div className="optpanel aiwrite"><span className="aiorb sm">✦</span>
-      <input autoFocus value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} maxLength={500} placeholder={body.trim() ? 'How should I improve it? (e.g. make it funnier)' : 'What should I write? (e.g. caption for my graduation)'} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); aiWrite(); } }} aria-label="Write with Connectly AI" />
+      <input autoFocus value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} maxLength={500} placeholder={body.trim() ? 'How should I improve it?' : 'What should I write?'} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); aiWrite(); } }} aria-label="Write with Connectly AI" />
       <button type="button" className="btn primary" disabled={aiBusy} onClick={aiWrite}>{aiBusy ? 'Writing…' : 'Write'}</button></div>}
     {panel === 'feeling' && <div className="optpanel feelgrid">{FEELINGS.map((f) => <button type="button" key={f.k} className={`chip ${feeling === f.k ? 'on' : ''}`} onClick={() => { setFeeling(feeling === f.k ? '' : f.k); setPanel(''); }}>{f.e} {f.k}</button>)}</div>}
     {panel === 'place' && <div className="optpanel"><label>Where are you?<input value={place} onChange={(e) => setPlace(e.target.value)} maxLength={120} autoFocus autoComplete="off" /></label></div>}
+    {poll && <div className="optpanel polledit"><input value={pollQ} onChange={(e) => setPollQ(e.target.value)} maxLength={300} placeholder="Ask a question" aria-label="Poll question" />
+      {poll.map((o, i) => <div key={i} className="row"><input value={o} onChange={(e) => setPoll(poll.map((x, j) => (j === i ? e.target.value : x)))} maxLength={80} placeholder={`Option ${i + 1}`} aria-label={`Option ${i + 1}`} />{poll.length > 2 && <button type="button" className="btn icon ghost" aria-label="Remove option" onClick={() => setPoll(poll.filter((_, j) => j !== i))}><Icon name="x" /></button>}</div>)}
+      <div className="row between">{poll.length < 6 && <button type="button" className="linkish" onClick={() => setPoll([...poll, ''])}>+ Add option</button>}<button type="button" className="linkish" onClick={() => setPoll(null)}>Remove poll</button></div></div>}
+    {panel === 'schedule' && <div className="optpanel"><label>Publish at<input type="datetime-local" value={when} min={new Date(Date.now() + 5 * 60e3 - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 16)} onChange={(e) => setWhen(e.target.value)} /></label>{when && <button type="button" className="linkish" onClick={() => { setWhen(''); setPanel(''); }}>Post now instead</button>}</div>}
+    {track && <div className="row musicsel"><span className="grow">♫ {track.title} · {track.artist}</span><button type="button" className="btn icon ghost" aria-label="Remove music" onClick={() => setTrack(null)}><Icon name="x" /></button></div>}
+    {musicOpen && <MusicPicker onClose={() => setMusicOpen(false)} onPick={(t) => { setTrack(t); setMusicOpen(false); }} />}
     <div className="composeropts">
       <label className="optbtn"><span className="dotc green"><Icon name="image" /></span>Photo/video<input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,video/3gpp" hidden onChange={(e) => pick(e.target.files?.[0])} /></label>
       {aiOn && <button type="button" className="optbtn" onClick={() => setPanel(panel === 'ai' ? '' : 'ai')}><span className="dotc aidot">✦</span>Write with Connectly AI</button>}
       <button type="button" className="optbtn" onClick={() => setStudio('new')}><span className="dotc blue">📷</span>Camera</button>
       {!isVideo && <button type="button" className="optbtn" onClick={() => setPanel(panel === 'feeling' ? '' : 'feeling')}><span className="dotc amber">🙂</span>Feeling</button>}
       {!isVideo && <button type="button" className="optbtn" onClick={() => setPanel(panel === 'place' ? '' : 'place')}><span className="dotc red"><Icon name="pin" /></span>Location</button>}
+      {ff.polls && !isVideo && !poll && <button type="button" className="optbtn" onClick={() => setPoll(['', ''])}><span className="dotc blue">📊</span>Poll</button>}
+      {ff.music && <button type="button" className="optbtn" onClick={() => setMusicOpen(true)}><span className="dotc aidot">♫</span>Music</button>}
+      {ff.creator_tools && !spaceId && !isVideo && <button type="button" className="optbtn" onClick={() => setPanel(panel === 'schedule' ? '' : 'schedule')}><span className="dotc amber"><Icon name="clock" /></span>{when ? 'Scheduled' : 'Schedule'}</button>}
+      {ff.close_friends && <button type="button" className={`optbtn ${cfOnly ? 'on' : ''}`} aria-pressed={cfOnly} onClick={() => setCfOnly(!cfOnly)}><span className="dotc" style={{ background: 'var(--cf)' }}>★</span>{cfOnly ? 'Close friends only' : 'Share with close friends only'}</button>}
+      {ff.hide_likes && <button type="button" className={`optbtn ${hideLikes ? 'on' : ''}`} aria-pressed={hideLikes} onClick={() => setHideLikes(!hideLikes)}><span className="dotc green">🙈</span>{hideLikes ? 'Like count hidden' : 'Hide like count'}</button>}
     </div>
     {studio && <MediaStudio allowVideo={!spaceId} initial={studio === 'edit' ? file : null} onClose={() => setStudio(null)} onDone={(r) => { setStudio(null); setEnhance(r.enhance); setFile(r.file); }} />}
     {busy && <div className="postprogress" role="status"><div className="progress"><div style={{ width: `${Math.max(pct, 8)}%` }} /></div><span className="meta">{busy === 'draft' ? 'Saving draft…' : pct < 100 ? `Posting… ${pct}%` : isVideo ? 'Processing video…' : 'Posting…'}</span></div>}
     {err && <p className="error" role="alert">{err}</p>}
     <div className="row">
       {!spaceId && !isVideo && <button type="button" className="btn ghost" disabled={!!busy} onClick={() => submit(null, true)}>Save draft</button>}
-      <button className="btn primary grow" disabled={!!busy || (!body.trim() && !file)}>{busy === 'post' ? <><span className="spinner sm" /> Posting…</> : 'Post'}</button>
+      <button className="btn primary grow" disabled={!!busy || (!body.trim() && !file && !poll)}>{busy === 'post' ? <><span className="spinner sm" /> Posting…</> : when ? 'Schedule' : 'Post'}</button>
     </div>
   </form>;
 }

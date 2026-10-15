@@ -86,7 +86,7 @@ async function processVideo(src, coverFile) {
   return { video: `/uploads/reels/${name}.mp4`, low: `/uploads/reels/${name}-480.mp4`, poster: `/uploads/reels/${name}.webp`, seconds: Math.round(meta.seconds * 10) / 10, copied: copyable };
 }
 
-export function registerReels(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility }) {
+export function registerReels(api, { applyPostExtras, requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility }) {
   const enabled = (_req, res, next) => (config.features.reels ? next() : res.status(404).json({ error: 'Not found' }));
   const uploadLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: config.isTest ? 10000 : 20, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'You’ve uploaded a lot of reels. Try again later.' } });
   const ReelSchema = z.object({ body: z.string().trim().max(2200).default(''), visibility: Visibility.default('public') }).strict();
@@ -110,6 +110,7 @@ export function registerReels(api, { requireAuth, requireVerified, id, pagePosts
       const asSpace = await actingPage(req);
       const { rows } = await q("INSERT INTO posts (author_id, body, visibility, as_space_id, kind, video_path, poster_path, video_seconds, video_low_path, image_path) VALUES ($1,$2,$3,$4,'reel',$5,$6,$7,$8,$6) RETURNING id",
         [req.user.id, d.body, d.visibility, asSpace, v.video, v.poster, v.seconds, v.low]);
+      if (applyPostExtras) await applyPostExtras(req, rows[0].id, d.body);
       res.status(201).json(await getVisiblePost(req.user.id, rows[0].id));
     } finally { if (tmp) fs.rm(tmp, { force: true }, () => {}); if (cover) fs.rm(cover.path, { force: true }, () => {}); }
   });

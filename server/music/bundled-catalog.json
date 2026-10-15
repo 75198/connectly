@@ -1,0 +1,102 @@
+[
+ {
+  "id": "bushwick-tarantella",
+  "title": "Bushwick Tarantella",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/bushwick-tarantella.m4a",
+  "license": "CC BY 3.0 us",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Bushwick_Tarantella_(MacLeod,_Kevin)_(ISRC_USUAN1300002).oga",
+  "mood": "Upbeat"
+ },
+ {
+  "id": "funkorama",
+  "title": "Funkorama",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/funkorama.m4a",
+  "license": "CC BY 3.0 us",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Funkorama_(MacLeod,_Kevin)_(ISRC_USUAN1100474).oga",
+  "mood": "Funky"
+ },
+ {
+  "id": "healing",
+  "title": "Healing",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/healing.m4a",
+  "license": "CC BY 3.0 us",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Healing_(Kevin_MacLeod)_(ISRC_USUAN1200048).oga",
+  "mood": "Calm"
+ },
+ {
+  "id": "call-to-adventure",
+  "title": "Call to Adventure",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/call-to-adventure.m4a",
+  "license": "CC BY 3.0",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Kevin_MacLeod_-_Call_to_Adventure.ogg",
+  "mood": "Epic"
+ },
+ {
+  "id": "clean-soul",
+  "title": "Clean Soul",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/clean-soul.m4a",
+  "license": "CC BY 3.0",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Kevin_MacLeod_-_Clean_Soul.ogg",
+  "mood": "Calm"
+ },
+ {
+  "id": "fluffing-a-duck",
+  "title": "Fluffing a Duck",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/fluffing-a-duck.m4a",
+  "license": "CC BY 3.0",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Kevin_MacLeod_-_Fluffing_a_Duck.ogg",
+  "mood": "Playful"
+ },
+ {
+  "id": "monkeys-spinning-monkeys",
+  "title": "Monkeys Spinning Monkeys",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/monkeys-spinning-monkeys.m4a",
+  "license": "CC BY 3.0",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Kevin_MacLeod_-_Monkeys_Spinning_Monkeys.ogg",
+  "mood": "Playful"
+ },
+ {
+  "id": "kool-kats",
+  "title": "Kool Kats",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/kool-kats.m4a",
+  "license": "CC BY 3.0 us",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Kool_Kats_(MacLeod,_Kevin)_(ISRC_USUAN1100601).oga",
+  "mood": "Chill"
+ },
+ {
+  "id": "stringed-disco",
+  "title": "Stringed Disco",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/stringed-disco.m4a",
+  "license": "CC BY 3.0",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Stringed_Disco_(MacLeod,_Kevin)_(ISRC_USUAN1100059).oga",
+  "mood": "Dance"
+ },
+ {
+  "id": "tea-roots",
+  "title": "Tea Roots",
+  "artist": "Kevin MacLeod",
+  "duration": 45,
+  "url": "/music/tea-roots.m4a",
+  "license": "CC BY 3.0 us",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Tea_Roots_(MacLeod,_Kevin)_(ISRC_USUAN1100472).oga",
+  "mood": "Chill"
+ }
+]

@@ -4,11 +4,16 @@ import { api, authorHref, Comment, Post, REACTIONS, Reaction, feelingEmoji, hapt
 import { useSession } from '../session';
 import { Avatar, Icon, Sheet, UserLink, VIS_ICON, VIS_LABEL } from './ui';
 import { EngagementSheet, trackShare, type EngTab } from './Engagement';
+import { DuetView, InsightsSheet, MusicChip, PollView, RichText, TranslateButton, VerifiedBadge, useImpression } from './Extras';
+import { useFeatures } from '../api';
+import { sfx } from '../lib/sounds';
 
 type Mode = 'feed' | 'draft' | 'deleted';
 export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Post; onChange: (p: Post) => void; onDelete: (id: number) => void; mode?: Mode }) {
   const { me } = useSession();
   const mine = post.is_mine;
+  const ffx = useFeatures();
+  const [colls, setColls] = useState(false);
   const [menu, setMenu] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const [share, setShare] = useState(false); const [eng, setEng] = useState<EngTab | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.body); const [dvis, setDvis] = useState(post.visibility);
@@ -17,9 +22,13 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
   const [err, setErr] = useState('');
   const myR = (post.my_reaction || (post.liked_by_me ? 'like' : null)) as Reaction | null;
   const rInfo = REACTIONS.find((r) => r.k === myR);
+  const f = useFeatures(); const ref = useRef<HTMLElement>(null); useImpression(ref, post.id, post.is_mine); const [tr, setTr] = useState<string | null>(null); const [ins, setIns] = useState(false);
+  const hideCount = (post.like_count === null || (post.hide_like_count && !mine) || (!!me?.hide_like_counts && !mine && !!f?.hide_likes));
+  const pin = async () => { setMenu(false); try { await api(`/posts/${post.id}/pin`, { method: post.pinned_at ? 'DELETE' : 'PUT' }); onChange({ ...post, pinned_at: post.pinned_at ? null : new Date().toISOString() }); toast(post.pinned_at ? 'Unpinned' : 'Pinned to your profile'); } catch (e: any) { setErr(e.message); } };
+  const toggleHide = async () => { setMenu(false); try { await api(`/posts/${post.id}/hide-likes`, { method: 'PUT', json: { hidden: !post.hide_like_count } }); onChange({ ...post, hide_like_count: !post.hide_like_count }); toast(post.hide_like_count ? 'Like count visible' : 'Like count hidden from others'); } catch (e: any) { setErr(e.message); } };
 
   async function react(r: Reaction | null) {
-    setPicker(false); haptic();
+    setPicker(false); haptic(); if (r) sfx(r === 'like' ? 'like' : 'reaction');
     const was = !!myR; const prev = post;
     const counts = { ...(post.reactions || {}) }; if (myR) counts[myR] = Math.max(0, (counts[myR] || 1) - 1); if (r) counts[r] = (counts[r] || 0) + 1;
     onChange({ ...post, liked_by_me: !!r, my_reaction: r, reactions: counts, like_count: post.like_count + (r ? (was ? 0 : 1) : -1) });
@@ -43,23 +52,28 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
   const top = Object.entries(post.reactions || {}).filter(([, n]) => (n || 0) > 0).sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, 3).map(([k]) => REACTIONS.find((r) => r.k === k)?.e);
   const edited = new Date(post.updated_at).getTime() - new Date(post.created_at).getTime() > 1000;
   return (
-    <article className={`card post ${mode !== 'feed' ? 'muted' : ''}`}>
+    <article ref={ref} className={`card post ${mode !== 'feed' ? 'muted' : ''}`}>
+      {post.pinned_at && mode === 'feed' && <div className="pinnedtag meta">📌 Pinned</div>}
       <header className="row between">
         <div className="row grow">
           <Link to={authorHref(post.author)}><Avatar user={post.author} size={42} /></Link>
-          <div className="grow"><UserLink user={post.author} />
+          <div className="grow"><UserLink user={post.author} /> <VerifiedBadge on={post.author.verified} size={15} />
             {post.feeling && <span className="meta"> is feeling {feelingEmoji(post.feeling)} {post.feeling}</span>}
             {post.location_tag && <span className="meta"> at <b>{post.location_tag}</b></span>}
             {post.space && !post.author.space && <> <span className="meta">▸</span> <Link className="ulink" to={`/s/${post.space.slug}`}>{post.space.name}</Link></>}
             <div className="meta posttime"><time dateTime={post.created_at} title={new Date(post.created_at).toLocaleString()}>{mode === 'deleted' && post.deleted_at ? `Deleted ${postTime(post.deleted_at)}` : mode === 'draft' ? `Draft · saved ${postTime(post.updated_at)}` : postTime(post.created_at)}</time>
-              {mode === 'feed' && edited && <> · <span title={`Edited ${new Date(post.updated_at).toLocaleString()}`}>Edited</span></>} · <span title={VIS_LABEL[post.visibility]} className="vis"><Icon name={VIS_ICON[post.visibility]} /></span></div>
+              {post.scheduled_for && new Date(post.scheduled_for) > new Date() && <> · <b className="schedtag">Scheduled {postTime(post.scheduled_for)}</b></>}{mode === 'feed' && edited && <> · <span title={`Edited ${new Date(post.updated_at).toLocaleString()}`}>Edited</span></>} · <span title={VIS_LABEL[post.visibility]} className="vis"><Icon name={VIS_ICON[post.visibility]} /></span></div>
           </div>
         </div>
         {mode === 'feed' && <div className="menuwrap"><button className="btn icon ghost" aria-label="Post options" aria-expanded={menu} onClick={() => setMenu(!menu)}><Icon name="more" /></button>
           {menu && <><div className="menuscrim" onClick={() => setMenu(false)} /><div className="menu" role="menu">
             {mine && <button role="menuitem" onClick={() => { setEditing(true); setMenu(false); }}><Icon name="gear" /> Edit post</button>}
+            {mine && f?.creator_tools && !post.author.space && <button role="menuitem" onClick={pin}>📌 {post.pinned_at ? 'Unpin from profile' : 'Pin to profile'}</button>}
+            {mine && f?.creator_tools && <button role="menuitem" onClick={() => { setMenu(false); setIns(true); }}>📊 View insights</button>}
+            {mine && f?.hide_likes && <button role="menuitem" onClick={toggleHide}>🙈 {post.hide_like_count ? 'Show like count' : 'Hide like count'}</button>}
             {mine && post.kind !== 'reel' && <button role="menuitem" onClick={toDraft}><Icon name="image" /> Save as draft</button>}
             <button role="menuitem" onClick={toggleSave}><Icon name="bookmark" /> {post.saved_by_me ? 'Unsave post' : 'Save post'}</button>
+            {ffx?.collections && <button role="menuitem" onClick={() => { setMenu(false); setColls(true); }}>📁 Save to collection</button>}
             {!mine && me && !post.author.space && <button role="menuitem" onClick={() => { setMenu(false); report(); }}><Icon name="flag" /> Report post</button>}
             {mine && <button role="menuitem" className="danger" onClick={() => { setMenu(false); setConfirmDel(true); }}><Icon name="x" /> Delete post</button>}
           </div></>}</div>}
@@ -70,9 +84,11 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
           <div className="row between"><select value={dvis} onChange={(e) => setDvis(e.target.value as any)}><option value="public">🌍 Public</option><option value="friends">👥 Friends</option><option value="private">🔒 Only me</option></select>
             <div className="row"><button type="button" className="btn ghost" onClick={() => { setEditing(false); setDraft(post.body); }}>Cancel</button><button className="btn primary">Save</button></div></div>
         </form>
-      ) : post.body && <p className="body">{post.body}</p>}
+      ) : post.body && <><p className="body"><RichText text={tr ?? post.body} /></p>{!mine && <TranslateButton text={post.body} onText={setTr} />}</>}
+      {post.poll && <PollView post={post} onChange={onChange} />}
+      {post.music && <MusicChip track={post.music} start={post.music_start} />}
       {post.image_path && post.kind !== 'reel' && <img className="postimg" src={post.image_path} alt="" loading="lazy" decoding="async" />}
-      {post.kind === 'reel' && post.poster_path && <Link to={`/reels/${post.id}`} className="reelthumb" aria-label="Watch reel"><img src={post.poster_path} alt="" loading="lazy" /><span><Icon name="play" /> Reel{post.view_count ? ` · ${post.view_count} views` : ''}</span></Link>}
+      {post.kind === 'reel' && post.remix_of && post.remix_layout === 'duet' ? <DuetView post={post} /> : post.kind === 'reel' && post.poster_path && <Link to={`/reels/${post.id}`} className="reelthumb" aria-label="Watch reel"><img src={post.poster_path} alt="" loading="lazy" /><span><Icon name="play" /> Reel{post.view_count ? ` · ${post.view_count} views` : ''}</span></Link>}
       {err && <p className="error">{err}</p>}
       {mode === 'draft' && <div className="row"><button className="btn primary grow" onClick={() => act(() => api(`/posts/${post.id}/publish`, { method: 'POST' }), 'Published')}>Publish</button>
         <button className="btn ghost" onClick={() => setEditing(true)}>Edit</button>
@@ -80,7 +96,7 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
       {mode === 'deleted' && <div className="row"><button className="btn primary grow" onClick={() => act(() => api(`/posts/${post.id}/restore`, { method: 'POST' }), 'Post restored')}>Restore</button>
         <button className="btn ghost danger" onClick={() => confirm('Delete this post forever? This cannot be undone.') && act(() => api(`/posts/${post.id}/permanent`, { method: 'DELETE' }), 'Deleted forever')}>Delete forever</button></div>}
       {mode === 'feed' && <>
-        <div className="counts meta">{post.like_count > 0 && <button className="rcount countbtn" aria-label="See who reacted" onClick={() => setEng('reactions')}>{(top.length ? top : ['👍']).map((e, i) => <i key={i}>{e}</i>)} {post.like_count}</button>}<span className="grow" />{post.comment_count > 0 && <button className="linkish" onClick={() => setEng('comments')}>{post.comment_count} comment{post.comment_count === 1 ? '' : 's'}</button>}{(post.share_count || 0) > 0 && <button className="linkish" onClick={() => setEng('shares')}>{post.share_count} share{post.share_count === 1 ? '' : 's'}</button>}</div>
+        <div className="counts meta">{post.like_count > 0 && !hideCount && <button className="rcount countbtn" aria-label="See who reacted" onClick={() => setEng('reactions')}>{(top.length ? top : ['👍']).map((e, i) => <i key={i}>{e}</i>)} {post.like_count}</button>}<span className="grow" />{post.comment_count > 0 && <button className="linkish" onClick={() => setEng('comments')}>{post.comment_count} comment{post.comment_count === 1 ? '' : 's'}</button>}{(post.share_count || 0) > 0 && <button className="linkish" onClick={() => setEng('shares')}>{post.share_count} share{post.share_count === 1 ? '' : 's'}</button>}</div>
         <div className="actions">
           <div className="reactwrap">
             {picker && <><div className="menuscrim" onClick={() => setPicker(false)} /><div className="reactbar" role="menu" aria-label="Reactions">{REACTIONS.map((r, i) => <button key={r.k} role="menuitem" style={{ animationDelay: `${i * 30}ms` }} aria-label={r.label} title={r.label} onClick={() => react(r.k)}>{r.e}</button>)}</div></>}
@@ -102,6 +118,8 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
           {post.kind !== 'reel' && <button className="btn ghost block" onClick={toDraft}>Move to Drafts</button>}
           <button className="btn block dangerbtn" onClick={del}>Delete</button>
           <button className="btn ghost block" onClick={() => setConfirmDel(false)}>Cancel</button></div></Sheet>}
+      {ins && <InsightsSheet post={post} onClose={() => setIns(false)} />}
+      {colls && <CollectionSheet postId={post.id} onClose={() => setColls(false)} />}
       {eng && <EngagementSheet post={post} tab={eng} onClose={() => setEng(null)} />}
       {share && <ShareSheet onShared={(c) => { trackShare(post.id, c); onChange({ ...post, share_count: (post.share_count || 0) + 1 }); }} url={`${location.origin}${post.kind === 'reel' ? '/reels/' : '/post/'}${post.id}`} text={post.body.slice(0, 120)} onClose={() => setShare(false)} />}
     </article>
@@ -132,7 +150,7 @@ export function Comments({ post, onCount }: { post: Post; onCount: (n: number) =
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load().catch((e) => setErr(e.message)); }, [post.id]);
   async function add(body: string, parent_id?: number) {
-    await api(`/posts/${post.id}/comments`, { json: { body, parent_id } }); setReplyTo(null); await load();
+    await api(`/posts/${post.id}/comments`, { json: { body, parent_id } }); sfx('comment'); setReplyTo(null); await load();
   }
   async function remove(c: Comment) { if (!confirm('Delete this comment?')) return; try { await api(`/comments/${c.id}`, { method: 'DELETE' }); await load(); } catch (e: any) { setErr(e.message); } }
   if (!items) return <p className="meta pad">{err || 'Loading comments…'}</p>;
@@ -140,7 +158,7 @@ export function Comments({ post, onCount }: { post: Post; onCount: (n: number) =
   const one = (c: Comment, isReply = false) => (
     <div key={c.id} className={`comment ${isReply ? 'reply' : ''}`}>
       <Avatar user={c.author} size={30} />
-      <div className="grow"><div className="bubble"><UserLink user={c.author} /><p>{c.body}</p></div>
+      <div className="grow"><div className="bubble"><UserLink user={c.author} /> <VerifiedBadge on={c.author.verified} size={13} /><p><RichText text={c.body} /></p></div>
         <div className="meta row small"><time title={new Date(c.created_at).toLocaleString()}>{timeAgo(c.created_at)}</time>
           <button className="linkish" onClick={() => setReplyTo(c)}>Reply</button>
           {(c.is_mine || post.is_mine) && <button className="linkish" onClick={() => remove(c)}>Delete</button>}</div>
@@ -161,4 +179,13 @@ function CommentBox({ onSubmit, placeholder }: { onSubmit: (b: string) => Promis
   return <form className="row commentbox" onSubmit={async (e) => { e.preventDefault(); if (!v.trim()) return; try { await onSubmit(v); setV(''); } catch (x: any) { setErr(x.message); } }}>
     <input value={v} onChange={(e) => setV(e.target.value)} placeholder={placeholder} maxLength={2000} autoFocus={placeholder.includes('reply')} /><button className="btn primary" disabled={!v.trim()}>Send</button>{err && <span className="error">{err}</span>}
   </form>;
+}
+
+export function CollectionSheet({ postId, onClose }: { postId: number; onClose: () => void }) {
+  const [items, setItems] = useState<{ id: number; name: string; count: number }[] | null>(null); const [name, setName] = useState('');
+  useEffect(() => { api<{ items: any[] }>('/collections').then((r) => setItems(r.items)).catch(() => setItems([])); }, []);
+  const add = async (id: number, n: string) => { await api(`/collections/${id}/posts/${postId}`, { method: 'PUT' }); toast(`Saved to ${n}`); onClose(); };
+  const create = async () => { if (!name.trim()) return; const c = await api<{ id: number; name: string }>('/collections', { json: { name } }); add(c.id, c.name); };
+  return <Sheet title="Save to collection" onClose={onClose}><div className="list">{items?.map((c) => <button key={c.id} onClick={() => add(c.id, c.name)}>📁 <span className="grow">{c.name}</span></button>)}</div>
+    <div className="row"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="New collection name" aria-label="New collection name" maxLength={60} /><button className="btn primary" onClick={create}>Create</button></div></Sheet>;
 }

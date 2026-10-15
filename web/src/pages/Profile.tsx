@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, User } from '../api';
+import { api, toast, useFeatures, User } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon, Sheet } from '../components/ui';
 import { Composer } from '../components/Composer';
@@ -8,21 +8,26 @@ import { MediaStudio } from '../components/MediaStudio';
 import { PostList, usePosts } from '../components/PostList';
 import { PlacePicker } from '../components/PlacePicker';
 import { TierBadge } from './Plans';
+import { PostCard } from '../components/PostCard';
+import { VerifiedBadge } from '../components/Extras';
+import { sfx } from '../lib/sounds';
+import type { Post } from '../api';
 
 const RELATIONSHIP = ['', 'Single', 'In a relationship', 'Engaged', 'Married', 'In a civil union', 'Separated', 'Divorced', 'Widowed', "It's complicated", 'Prefer not to say'];
 
 function FriendButtons({ u, onChange }: { u: User; onChange: (p: Partial<User>) => void }) {
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [menu, setMenu] = useState(false); const nav = useNavigate();
-  const call = async (path: string, method: string, patch?: (r: any) => Partial<User>) => { setBusy(true); setErr(''); try { const r = await api(path, { method }); if (patch) onChange(patch(r)); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const call = async (path: string, method: string, patch?: (r: any) => Partial<User>) => { setBusy(true); setErr(''); try { const r = await api(path, { method }); if (patch) onChange(patch(r)); if (path.endsWith('/follow') && method === 'PUT') sfx('follow'); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const n = encodeURIComponent(u.username);
   return <div className="stack pad">
     <div className="row wrap">
-      <button className={`btn ${u.following ? 'ghost' : 'primary'} grow`} disabled={busy} aria-pressed={!!u.following} onClick={() => call(`/users/${n}/follow`, u.following ? 'DELETE' : 'PUT', (r) => ({ following: r.following, follower_count: r.follower_count ?? (u.follower_count || 0) + (r.following ? 1 : -1) }))}>{u.following ? '✓ Following' : u.follows_me ? 'Follow back' : 'Follow'}</button>
+      <button className={`btn ${u.following ? 'ghost' : 'primary'} grow`} disabled={busy} aria-pressed={!!u.following} onClick={() => call(`/users/${n}/follow`, u.following || (u as any).requested ? 'DELETE' : 'PUT', (r) => ({ following: r.following, requested: !!r.requested, follower_count: r.follower_count ?? (u.follower_count || 0) + (r.following ? 1 : -1) } as any))}>{u.following ? '✓ Following' : (u as any).requested ? 'Requested' : u.follows_me ? 'Follow back' : 'Follow'}</button>
+      {(u as any).can_message && <button className="btn ghost grow" disabled={busy} onClick={async () => { setBusy(true); try { const r = await api<{ id: number }>('/conversations', { json: { usernames: [u.username] } }); nav(`/messages/${r.id}`); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } }}><Icon name="chat" /> Message</button>}
       <button className="btn icon ghost" aria-label="More options" onClick={() => setMenu(true)}><Icon name="more" /></button>
     </div>
     {err && <p className="error">{err}</p>}
     {menu && <Sheet title={u.full_name} onClose={() => setMenu(false)}>
-      <div className="list"><button className="danger" onClick={async () => { if (!confirm(`Block ${u.full_name}? You won’t see each other’s profiles or posts, and you’ll be unfriended.`)) return; await api(`/users/${n}/block`, { method: 'PUT' }); nav('/'); }}><Icon name="lock" /> Block {u.full_name.split(' ')[0]}</button><button className="danger" onClick={async () => { const reason = prompt(`Why are you reporting ${u.full_name}? (fake account, spam, harassment…)`); if (!reason || !reason.trim()) return; try { await api('/reports', { json: { target_type: 'user', username: u.username, reason: reason.trim() } }); alert('Thanks. Our moderators will review this account.'); } catch (e: any) { alert(e.message); } }}><Icon name="flag" /> Report {u.full_name.split(' ')[0]}</button></div>
+      <div className="list"><RestrictMute username={n} name={u.full_name.split(' ')[0]} /><button className="danger" onClick={async () => { if (!confirm(`Block ${u.full_name}? You won’t see each other’s profiles or posts, and you’ll be unfriended.`)) return; await api(`/users/${n}/block`, { method: 'PUT' }); nav('/'); }}><Icon name="lock" /> Block {u.full_name.split(' ')[0]}</button><button className="danger" onClick={async () => { const reason = prompt(`Why are you reporting ${u.full_name}? (fake account, spam, harassment…)`); if (!reason || !reason.trim()) return; try { await api('/reports', { json: { target_type: 'user', username: u.username, reason: reason.trim() } }); alert('Thanks. Our moderators will review this account.'); } catch (e: any) { alert(e.message); } }}><Icon name="flag" /> Report {u.full_name.split(' ')[0]}</button></div>
     </Sheet>}
   </div>;
 }
@@ -35,15 +40,16 @@ export function Profile() {
   if (err) return <div className="card empty">{err}</div>;
   if (!u) return <div className="card profilehead skel" style={{ height: 360 }}><span className="sk block" /></div>;
   const work = [u.work_role, u.work_company].filter(Boolean).join(' at ');
+  const pinned = usePinned(username);
   const photos = feed.items.filter((p) => p.image_path || p.poster_path);
   return <div className="stack">
     <section className="card profilehead">
       <div className="cover" style={u.cover_path ? { backgroundImage: `url(${u.cover_path})` } : undefined} />
       <div className="pinfo">
         <div className="pav"><Avatar user={u} size={112} /></div>
-        <h1>{u.full_name} <TierBadge tier={u.tier} /></h1><div className="meta">@{u.username}{u.location ? ` · 📍 ${u.location}` : ''}</div>
+        <h1>{u.full_name} <VerifiedBadge on={u.verified} size={22} /> <TierBadge tier={u.tier} /></h1><div className="meta">@{u.username}{u.location ? ` · 📍 ${u.location}` : ''}</div>
         {u.bio && <p className="pbiotext">{u.bio}</p>}
-        <div className="pstats"><span><b>{u.post_count ?? 0}</b><small>Posts</small></span><Link to={`/u/${u.username}/followers`}><b>{u.follower_count ?? 0}</b><small>Followers</small></Link><Link to={`/u/${u.username}/following`}><b>{u.following_count ?? 0}</b><small>Following</small></Link></div>
+        <div className="pstats"><span><b>{u.post_count ?? 0}</b><small>Posts</small></span><Link to={(u as any).lists_hidden ? '#' : `/u/${u.username}/followers`}><b>{u.follower_count ?? 0}</b><small>Followers</small></Link><Link to={(u as any).lists_hidden ? '#' : `/u/${u.username}/following`}><b>{u.following_count ?? 0}</b><small>Following</small></Link></div>
         {u.is_me ? <div className="row pactions"><Link className="btn primary grow" to="/settings/profile"><Icon name="gear" /> Edit profile</Link><Link className="btn ghost" to="/me/saved" aria-label="Saved"><Icon name="bookmark" /></Link></div>
           : <div className="pactions"><FriendButtons u={u} onChange={(p) => setU({ ...u, ...p })} /></div>}
       </div>
@@ -59,8 +65,10 @@ export function Profile() {
         {!work && !u.education && !u.location && !u.hometown && !u.relationship_status && !u.interests?.length && <p className="meta">No details shared yet.</p>}
     </section>}
     {tab === 'photos' && (photos.length ? <div className="photogrid">{photos.map((p) => <Link key={p.id} to={p.kind === 'reel' ? `/reels/${p.id}` : `/post/${p.id}`}><img src={(p.kind === 'reel' ? p.poster_path : p.image_path)!} alt="" loading="lazy" />{p.kind === 'reel' && <i>▶</i>}</Link>)}</div> : <p className="card empty">No photos yet.</p>)}
-    {tab === 'posts' && <>
+    {(u as any).locked && <section className="card lockcard"><div className="lockicon">🔒</div><b>This account is private</b><p className="meta">Follow this account to see their photos and videos.</p></section>}
+    {tab === 'posts' && !(u as any).locked && <>
       {u.is_me && <Composer onPosted={(p) => feed.setItems((x) => [p, ...x])} />}
+      <PinnedPosts items={pinned} />
       <PostList feed={feed} empty={u.is_me ? "You haven't posted yet." : 'No posts you can see yet.'} /></>}
   </div>;
 }
@@ -126,4 +134,15 @@ export function EditProfile() {
       <div className="row"><button className="btn primary" disabled={busy === 'save'}>{busy === 'save' ? 'Saving…' : 'Save changes'}</button><button type="button" className="btn ghost" onClick={() => nav(`/u/${me.username}`)}>View profile</button></div>
     </form>
   </div>;
+}
+
+function usePinned(username: string) { const [p, setP] = useState<Post[]>([]); useEffect(() => { api<{ items: Post[] }>(`/users/${encodeURIComponent(username)}/pinned`).then((r) => setP(r.items)).catch(() => setP([])); }, [username]); return p; }
+export function PinnedPosts({ items }: { items: Post[] }) { const [list, setList] = useState(items); useEffect(() => setList(items), [items]); return <>{list.map((p) => <PostCard key={`pin${p.id}`} post={p} onChange={(n) => setList(list.map((x) => (x.id === n.id ? n : x)))} onDelete={(id) => setList(list.filter((x) => x.id !== id))} />)}</>; }
+
+function RestrictMute({ username, name }: { username: string; name: string }) {
+  const f = useFeatures(); const [r, setR] = useState<{ restricted?: boolean; muted?: boolean }>({});
+  useEffect(() => { if (f?.restrict_mute) api<any>(`/users/${username}/relationship`).then(setR).catch(() => {}); }, [f?.restrict_mute, username]);
+  if (!f?.restrict_mute) return null;
+  const tog = async (k: 'restrict' | 'mute', on: boolean) => { await api(`/users/${username}/${k}`, on ? { method: 'PUT', json: {} } : { method: 'DELETE' }); setR({ ...r, [k === 'restrict' ? 'restricted' : 'muted']: on }); toast(on ? (k === 'restrict' ? `${name} is restricted. They won’t know.` : `Muted ${name}. They won’t know.`) : 'Undone'); };
+  return <><button onClick={() => tog('restrict', !r.restricted)}>🚧 {r.restricted ? 'Unrestrict' : 'Restrict'}</button><button onClick={() => tog('mute', !r.muted)}>🔕 {r.muted ? 'Unmute' : 'Mute posts and stories'}</button></>;
 }

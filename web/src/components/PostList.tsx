@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, Page, Post } from '../api';
 import { PostCard } from './PostCard';
@@ -20,7 +21,7 @@ export function usePosts(path: string) {
   return { items, setItems, load, done, loading, err };
 }
 
-export function PostList({ feed, empty, mode }: { feed: ReturnType<typeof usePosts>; empty: string; mode?: 'feed' | 'draft' | 'deleted' }) {
+export function PostList({ feed, empty, mode, interleave }: { feed: ReturnType<typeof usePosts>; empty: string; mode?: 'feed' | 'draft' | 'deleted'; interleave?: (i: number) => React.ReactNode }) {
   const { items, setItems, load, done, loading, err } = feed;
   // Infinite scroll: load the next page when a sentinel ~800px below the viewport becomes visible.
   const sentinel = useRef<HTMLDivElement>(null);
@@ -32,7 +33,7 @@ export function PostList({ feed, empty, mode }: { feed: ReturnType<typeof usePos
     io.observe(sentinel.current); return () => io.disconnect();
   }, [hasIO, items.length]);
   return <>
-    {items.map((p) => <PostCard key={p.id} mode={mode} post={p} onChange={(np) => setItems((xs) => xs.map((x) => x.id === np.id ? np : x))} onDelete={(id) => setItems((xs) => xs.filter((x) => x.id !== id))} />)}
+    {items.map((p, i) => <Fragment key={p.id}><PostCard mode={mode} post={p} onChange={(np) => setItems((xs) => xs.map((x) => x.id === np.id ? np : x))} onDelete={(id) => setItems((xs) => xs.filter((x) => x.id !== id))} />{interleave?.(i)}</Fragment>)}
     {err && <p className="error card">{err}</p>}
     {!loading && done && items.length === 0 && <p className="card empty">{empty}</p>}
     {loading && (items.length ? <div className="spinner" aria-label="Loading" /> : <PostSkeleton n={3} />)}

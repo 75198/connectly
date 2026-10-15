@@ -14,9 +14,9 @@ export const LIVE_REACTIONS = ['❤️', '👍', '😂', '😮', '👏', '🔥']
 const MONTH_LIMIT_MSG = 'Live video has reached its free monthly limit. Please try again next month.';
 export const liveConfigured = () => !!(config.livekitUrl && config.livekitApiKey && config.livekitApiSecret);
 
-export async function mintToken({ room, identity, name, canPublish, ttlSeconds }) {
+export async function mintToken({ room, identity, name, canPublish, ttlSeconds, canPublishData = false }) {
   const at = new AccessToken(config.livekitApiKey, config.livekitApiSecret, { identity, name, ttl: Math.max(60, Math.floor(ttlSeconds)) });
-  at.addGrant({ roomJoin: true, room, canPublish, canSubscribe: true, canPublishData: false });
+  at.addGrant({ roomJoin: true, room, canPublish, canSubscribe: true, canPublishData });
   return at.toJwt();
 }
 async function closeRoom(room) {

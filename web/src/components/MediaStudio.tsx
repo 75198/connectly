@@ -4,6 +4,8 @@ import { PointerEvent as RPE, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './ui';
 import { askPermission, showPermissionDenied } from '../lib/permission';
+import { useFeatures } from '../api';
+import { EFFECTS, loadFaceLandmarker, startAR, type EffectKey } from '../lib/ar';
 
 export type StudioResult = { file: File; enhance: boolean };
 type Props = { onDone: (r: StudioResult) => void; onClose: () => void; allowVideo?: boolean; initial?: File | Blob | null; startWith?: 'menu' | 'camera' | 'avatar' };
@@ -47,6 +49,8 @@ export function MediaStudio({ onDone, onClose, allowVideo, initial, startWith = 
 function Camera({ allowVideo, onPhoto, onVideo, onBack }: { allowVideo: boolean; onPhoto: (b: Blob) => void; onVideo: (f: File) => void; onBack: () => void }) {
   const v = useRef<HTMLVideoElement>(null); const stream = useRef<MediaStream | null>(null); const rec = useRef<MediaRecorder | null>(null);
   const [facing, setFacing] = useState<'environment' | 'user'>('environment'); const [err, setErr] = useState('');
+  const ff = useFeatures(); const [fx, setFx] = useState<EffectKey>('none'); const fxRef = useRef<EffectKey>('none'); fxRef.current = fx; const cv = useRef<HTMLCanvasElement>(null); const [arState, setArState] = useState<'' | 'loading' | 'on' | 'failed'>(''); const facingRef = useRef(facing); facingRef.current = facing;
+  useEffect(() => { if (fx === 'none' || arState === 'on' || arState === 'loading') return; setArState('loading'); let stop: (() => void) | undefined; loadFaceLandmarker().then((fl) => { if (!v.current || !cv.current) return; stop = startAR(v.current, cv.current, () => fxRef.current, () => facingRef.current === 'user', fl); setArState('on'); }).catch(() => { setArState('failed'); setFx('none'); setErr('Effects aren’t available on this device.'); }); return () => { if (stop) { stop(); setArState(''); } }; }, [fx === 'none']); // eslint-disable-line react-hooks/exhaustive-deps
   const [torch, setTorch] = useState<boolean | null>(null); const [mode, setMode] = useState<'photo' | 'video'>('photo'); const [recSecs, setRecSecs] = useState<number | null>(null);
   useEffect(() => {
     let live = true;
@@ -64,7 +68,9 @@ function Camera({ allowVideo, onPhoto, onVideo, onBack }: { allowVideo: boolean;
     return () => { live = false; stream.current?.getTracks().forEach((t) => t.stop()); };
   }, [facing, mode, allowVideo]);
   const toggleTorch = async () => { const t: any = stream.current?.getVideoTracks()[0]; if (!t) return; try { await t.applyConstraints({ advanced: [{ torch: !torch }] }); setTorch(!torch); } catch { setTorch(null); } };
+  const arOn = arState === 'on' && fx !== 'none';
   const snap = () => {
+    if (arOn && cv.current) { cv.current.toBlob((b) => b && onPhoto(b), 'image/jpeg', 0.95); return; }
     const el = v.current!; const c = document.createElement('canvas'); c.width = el.videoWidth; c.height = el.videoHeight;
     const g = c.getContext('2d')!; if (facing === 'user') { g.translate(c.width, 0); g.scale(-1, 1); } g.drawImage(el, 0, 0);
     c.toBlob((b) => b && onPhoto(b), 'image/jpeg', 0.95);
@@ -73,7 +79,8 @@ function Camera({ allowVideo, onPhoto, onVideo, onBack }: { allowVideo: boolean;
     if (rec.current) { rec.current.stop(); return; }
     const type = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t));
     if (!type || !stream.current) return setErr('Recording isn’t supported in this browser.');
-    const chunks: Blob[] = []; const r = new MediaRecorder(stream.current, { mimeType: type, videoBitsPerSecond: 8_000_000 }); rec.current = r;
+    const src = arOn && cv.current ? new MediaStream([...cv.current.captureStream(30).getVideoTracks(), ...stream.current.getAudioTracks()]) : stream.current;
+    const chunks: Blob[] = []; const r = new MediaRecorder(src, { mimeType: type, videoBitsPerSecond: 8_000_000 }); rec.current = r;
     r.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     r.onstop = () => { rec.current = null; setRecSecs(null); const base = type.split(';')[0]; onVideo(new File(chunks, `reel.${base.endsWith('mp4') ? 'mp4' : 'webm'}`, { type: base })); };
     r.start(500); setRecSecs(0);
@@ -81,11 +88,13 @@ function Camera({ allowVideo, onPhoto, onVideo, onBack }: { allowVideo: boolean;
   };
   return <div className="camera">
     <video ref={v} playsInline muted className={facing === 'user' ? 'mirror' : ''} />
+    <canvas ref={cv} className="arcanvas" hidden={!arOn} aria-hidden="true" />
     <div className="row between studiohead"><button className="btn icon reelbtn" aria-label="Back" onClick={onBack}><Icon name="back" /></button>
-      {recSecs !== null && <b className="recdot">● {recSecs}s / 60s</b>}
+      {recSecs !== null && <b className="recdot">● {recSecs}s</b>}
       <span className="row">{torch !== null && <button className="btn icon reelbtn" aria-label="Flash" aria-pressed={torch} onClick={toggleTorch}>{torch ? '⚡' : '🔦'}</button>}</span></div>
     {err && <p className="camerr">{err}</p>}
     <div className="camctl">
+      {ff?.ar_effects && <div className="fxrow" role="listbox" aria-label="Effects">{EFFECTS.map((e) => <button key={e.k} role="option" aria-selected={fx === e.k} className={fx === e.k ? 'on' : ''} disabled={recSecs !== null} onClick={() => setFx(e.k)}><span>{e.icon}</span><small>{e.label}</small></button>)}{arState === 'loading' && <small className="fxload">Loading effects…</small>}</div>}
       {allowVideo && <div className="segmented dark">{(['photo', 'video'] as const).map((m) => <button key={m} className={mode === m ? 'on' : ''} disabled={recSecs !== null} onClick={() => setMode(m)}>{m === 'photo' ? 'Photo' : 'Video'}</button>)}</div>}
       <div className="row camrow"><span style={{ width: 48 }} />
         <button className={`shutter ${mode === 'video' ? 'vid' : ''} ${recSecs !== null ? 'rec' : ''}`} aria-label={mode === 'photo' ? 'Take photo' : recSecs !== null ? 'Stop recording' : 'Start recording'} onClick={mode === 'photo' ? snap : record} />

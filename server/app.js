@@ -24,6 +24,13 @@ import { registerLive } from './live.js';
 import { registerEngagement } from './engagement.js';
 import { registerSubscriptions } from './subscriptions.js';
 import { newChallenge, verifyPow } from './pow.js';
+import { registerMessages } from './messages.js';
+import { registerRound7, saveTags, twoStepMethods, startTwoStep, loginAlert } from './round7.js';
+import { registerRound8, recordActivity } from './round8.js';
+import { registerNews, recordSearch } from './news.js';
+import { registerBackfill } from './backfill.js';
+import { registerRound9, notifyMentions, allowedBy, isRestricted } from './round9.js';
+import { hiddenWordsOf, matchesHidden } from './messages.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BCRYPT_COST = config.isTest ? 4 : 12;
@@ -69,24 +76,29 @@ const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility =
   SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND
    ((f.requester_id = $1 AND f.addressee_id = p.author_id) OR (f.addressee_id = $1 AND f.requester_id = p.author_id)))
   OR EXISTS (SELECT 1 FROM follows f1 JOIN follows f2 ON f2.follower_id = f1.followee_id AND f2.followee_id = f1.follower_id WHERE f1.follower_id = $1 AND f1.followee_id = p.author_id)))
-  AND p.hidden_at IS NULL AND p.deleted_at IS NULL AND NOT p.is_draft AND NOT EXISTS (SELECT 1 FROM users su WHERE su.id = p.author_id AND su.suspended_at IS NOT NULL)
-  AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $1))`;
+  AND p.hidden_at IS NULL AND p.deleted_at IS NULL AND NOT p.is_draft AND (p.scheduled_for IS NULL OR p.scheduled_for <= now() OR p.author_id = $1) AND NOT EXISTS (SELECT 1 FROM users su WHERE su.id = p.author_id AND su.suspended_at IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $1))
+  AND (p.author_id = $1 OR NOT EXISTS (SELECT 1 FROM users pu WHERE pu.id = p.author_id AND pu.is_private) OR EXISTS (SELECT 1 FROM follows pf WHERE pf.follower_id = $1 AND pf.followee_id = p.author_id))
+  AND (NOT p.close_friends_only OR p.author_id = $1 OR EXISTS (SELECT 1 FROM close_friends cfp WHERE cfp.user_id = p.author_id AND cfp.friend_id = $1))`;
 // author of a post/comment: the page when posted "as a page", otherwise the user
 const authorJson = (alias, userAlias) => `CASE WHEN ${alias}.as_space_id IS NOT NULL THEN (SELECT json_build_object('id', s.id, 'username', s.slug, 'full_name', s.name, 'avatar_path', s.photo_path, 'space', true, 'kind', s.kind) FROM spaces s WHERE s.id = ${alias}.as_space_id)
-  ELSE json_build_object('id', ${userAlias}.id, 'username', ${userAlias}.username, 'full_name', ${userAlias}.full_name, 'avatar_path', ${userAlias}.avatar_path) END`;
-const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at, p.kind, p.video_path, p.video_low_path, p.poster_path, p.video_seconds, p.feeling, p.location_tag, p.is_draft, p.deleted_at,
+  ELSE json_build_object('id', ${userAlias}.id, 'username', ${userAlias}.username, 'full_name', ${userAlias}.full_name, 'avatar_path', ${userAlias}.avatar_path, 'verified', ${userAlias}.verified_at IS NOT NULL) END`;
+const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at, p.kind, p.video_path, p.video_low_path, p.poster_path, p.video_seconds, p.feeling, p.location_tag, p.is_draft, p.deleted_at, p.pinned_at, p.scheduled_for, p.hide_like_count, p.effect, p.remix_layout, p.music_start,
+  (SELECT row_to_json(mt) FROM (SELECT t.id, t.title, t.artist, t.url, t.license FROM music_tracks t WHERE t.id = p.music_track_id) mt) AS music,
+  (SELECT row_to_json(rx) FROM (SELECT o.id, o.video_path, o.poster_path, ou.username, ou.full_name FROM posts o JOIN users ou ON ou.id = o.author_id WHERE o.id = p.remix_of_id AND o.deleted_at IS NULL AND o.hidden_at IS NULL) rx) AS remix_of,
+  (SELECT json_build_object('id', pl.id, 'question', pl.question, 'options', pl.options, 'closes_at', pl.closes_at, 'counts', (SELECT COALESCE(json_object_agg(v.option_idx, v.n), '{}') FROM (SELECT option_idx, count(*)::int n FROM poll_votes WHERE poll_id = pl.id GROUP BY option_idx) v), 'my_vote', (SELECT option_idx FROM poll_votes WHERE poll_id = pl.id AND user_id = $1)) FROM polls pl WHERE pl.post_id = p.id) AS poll,
   (SELECT l.reaction FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $1) AS my_reaction,
   (SELECT COALESCE(json_object_agg(x.reaction, x.n), '{}') FROM (SELECT reaction, count(*)::int AS n FROM post_likes l WHERE l.post_id = p.id GROUP BY reaction) x) AS reactions,
   EXISTS (SELECT 1 FROM saved_posts sp WHERE sp.post_id = p.id AND sp.user_id = $1) AS saved_by_me,
   (SELECT count(*)::int FROM reel_views rv WHERE rv.post_id = p.id) AS view_count,
   ${authorJson('p', 'u')} AS author, (p.author_id = $1) AS is_mine,
   (SELECT json_build_object('slug', s.slug, 'name', s.name, 'kind', s.kind) FROM spaces s WHERE s.id = p.space_id) AS space,
-  (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
+  CASE WHEN p.hide_like_count AND p.author_id <> $1 THEN NULL ELSE (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id) END AS like_count,
   (SELECT count(*) FROM comments c WHERE c.post_id = p.id) AS comment_count,
   (SELECT count(*)::int FROM shares sh WHERE sh.post_id = p.id) AS share_count,
   EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me
   FROM posts p JOIN users u ON u.id = p.author_id AND (u.deactivated_at IS NULL OR u.id = $1)`;
-const publicUser = (u) => u && ({ id: u.id, username: u.username, full_name: u.full_name, bio: u.bio, location: u.location, hometown: u.hometown, interests: u.interests || [], relationship_status: u.relationship_status, work_company: u.work_company, work_role: u.work_role, education: u.education, avatar_path: u.avatar_path, cover_path: u.cover_path });
+const publicUser = (u) => u && ({ id: u.id, username: u.username, full_name: u.full_name, bio: u.bio, location: u.location, hometown: u.hometown, interests: u.interests || [], relationship_status: u.relationship_status, work_company: u.work_company, work_role: u.work_role, education: u.education, avatar_path: u.avatar_path, cover_path: u.cover_path, verified: !!u.verified_at && config.features.verified });
 
 async function getOwnPost(userId, postId) {
   const { rows } = await q(`${POST_SELECT} WHERE p.id = $2 AND p.author_id = $1`, [userId, postId]);
@@ -115,14 +127,48 @@ async function actingPage(req) {
 }
 // LiveKit signalling/region endpoints for Go Live (only when configured).
 function liveConnectSrc() {
-  try { if (!config.features.live || !config.livekitUrl) return []; const h = new URL(config.livekitUrl).host; const base = h.split('.').slice(-2).join('.'); return [`wss://${h}`, `https://${h}`, `wss://*.${base}`, `https://*.${base}`]; } catch { return []; }
+  try { if (!(config.features.live || config.features.calls) || !config.livekitUrl) return []; const h = new URL(config.livekitUrl).host; const base = h.split('.').slice(-2).join('.'); return [`wss://${h}`, `https://${h}`, `wss://*.${base}`, `https://*.${base}`]; } catch { return []; }
 }
+export function round78Features() {
+  const f = config.features; const out = {};
+  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety'])
+    out[k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] = !!f[k];
+  return out;
+}
+// Extra post fields from the composer (multipart strings): hashtags, schedule, poll, music, like-count visibility.
+async function applyPostExtras(req, postId, body) {
+  const b = req.body || {};
+  const d = z.object({ scheduled_for: z.string().datetime({ offset: true }).optional(), poll: z.string().max(3000).optional(), music_track_id: z.coerce.number().int().positive().optional(), music_start: z.coerce.number().int().min(0).max(600).optional(), hide_like_count: z.enum(['0', '1']).optional(), effect: z.string().regex(/^[a-z0-9-]{1,30}$/).optional(), remix_of_id: z.coerce.number().int().positive().optional(), remix_layout: z.enum(['duet', 'stitch']).optional() })
+    .parse({ remix_of_id: b.remix_of_id || undefined, remix_layout: b.remix_layout || undefined, scheduled_for: b.scheduled_for || undefined, poll: b.poll || undefined, music_track_id: b.music_track_id || undefined, music_start: b.music_start || undefined, hide_like_count: b.hide_like_count || undefined, effect: b.effect || undefined });
+  if (config.features.hashtags) await saveTags(postId, body);
+  if (config.features.closeFriends && (b.close_friends === '1' || b.close_friends === true)) await q('UPDATE posts SET close_friends_only = true WHERE id = $1', [postId]);
+  if (body && !b.scheduled_for) await notifyMentions(body, req.user.id, 'tag', { post_id: postId });
+  if (d.scheduled_for && config.features.creatorTools) {
+    const t = new Date(d.scheduled_for);
+    if (t <= new Date(Date.now() + 60000) || t > new Date(Date.now() + 180 * 864e5)) throw new HttpError(400, 'Pick a time in the future');
+    await q('UPDATE posts SET scheduled_for = $2, created_at = $2 WHERE id = $1', [postId, t]);
+  }
+  if (d.poll && config.features.polls) {
+    const poll = z.object({ question: z.string().trim().min(1).max(300), options: z.array(z.string().trim().min(1).max(80)).min(2).max(6), days: z.number().int().min(1).max(30).nullable().optional() }).strict().parse(JSON.parse(d.poll));
+    await q("INSERT INTO polls (post_id, question, options, closes_at) VALUES ($1,$2,$3, CASE WHEN $4::int IS NULL THEN NULL ELSE now() + make_interval(days => $4::int) END)", [postId, poll.question, JSON.stringify(poll.options), poll.days ?? null]);
+  }
+  if (d.music_track_id && config.features.music) await q('UPDATE posts SET music_track_id = (SELECT id FROM music_tracks WHERE id = $2 AND active), music_start = $3 WHERE id = $1', [postId, d.music_track_id, d.music_start || 0]);
+  if (d.hide_like_count === '1' && config.features.hideLikes) await q('UPDATE posts SET hide_like_count = true WHERE id = $1', [postId]);
+  if (d.remix_of_id && config.features.remix) {
+    const o = await getVisiblePost(req.user.id, d.remix_of_id);
+    if (!o || o.kind !== 'reel') throw new HttpError(404, 'The original reel isn’t available');
+    await q('UPDATE posts SET remix_of_id = $2, remix_layout = $3 WHERE id = $1', [postId, o.id, d.remix_layout || 'duet']);
+    notify((await q('SELECT author_id FROM posts WHERE id = $1', [o.id])).rows[0].author_id, req.user.id, 'remix', { post_id: postId });
+  }
+  if (d.effect && config.features.arEffects) await q('UPDATE posts SET effect = $2 WHERE id = $1', [postId, d.effect]);
+}
+export { applyPostExtras };
 export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(helmet({
-    contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], mediaSrc: ["'self'", 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"], connectSrc: ["'self'", ...liveConnectSrc()], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
+    contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:', ...(config.features.backfill ? ['https://archive.org', 'https://*.archive.org'] : [])], frameSrc: config.features.backfill ? ['https://archive.org'] : ["'none'"], mediaSrc: ["'self'", 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'", ...(config.features.arEffects ? ["'wasm-unsafe-eval'"] : [])], workerSrc: ["'self'", 'blob:'], connectSrc: ["'self'", ...liveConnectSrc()], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
     crossOriginResourcePolicy: { policy: 'same-origin' },
   }));
   app.use(compression({ threshold: 1024 }));
@@ -145,6 +191,7 @@ export function createApp() {
   api.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   api.use((req, res, next) => (req.method === 'GET' ? next() : writeLimiter(req, res, next)));
 
+  api.use((req, res, next) => { if (req.method !== 'GET' && req.user && config.features.streaks) res.on('finish', () => { if (res.statusCode < 400 && /^\/(posts|reels|stories|comments|conversations|live)/.test(req.path)) recordActivity(req.user.id); }); next(); });
   api.get('/health', async (_req, res) => { await q('SELECT 1'); res.json({ ok: true }); });
 
   // ---------- auth ----------
@@ -154,7 +201,7 @@ export function createApp() {
   const requireChannel = (id) => {
     if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
   };
-  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero, ai_support: config.features.aiSupport, live: config.features.live, subscriptions: config.features.subscriptions } }));
+  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero, ai_support: config.features.aiSupport, live: config.features.live, subscriptions: config.features.subscriptions, ...round78Features() } }));
   api.get('/auth/challenge', authLimiter, (_req, res) => res.json(newChallenge()));
   const MAX_ACCOUNTS = 10;
   const accountsFor = async (id, { verifiedOnly = true } = {}) => (await q(
@@ -192,8 +239,10 @@ export function createApp() {
       await client.query(`DELETE FROM users WHERE ${identCol(id)} = $1 AND email_verified_at IS NULL`, [id.value]);
       const uname = await generateUsername(d.full_name, client);
       const { rows } = await client.query(
-        `INSERT INTO users (username, full_name, email, phone, password_hash, birth_date, terms_accepted_at) VALUES ($1,$2,$3,$4,$5,$6, now()) RETURNING id`,
-        [uname, d.full_name, id.type === 'email' ? id.value : null, id.type === 'phone' ? id.value : null, hash, d.birth_date]);
+        `INSERT INTO users (username, full_name, email, phone, password_hash, birth_date, terms_accepted_at, is_private) VALUES ($1,$2,$3,$4,$5,$6, now(), $7) RETURNING id`,
+        [uname, d.full_name, id.type === 'email' ? id.value : null, id.type === 'phone' ? id.value : null, hash, d.birth_date,
+         // Teen safety: new under-18 accounts start private (existing accounts are never changed).
+         !!(config.features.teenSafety && d.birth_date && new Date(d.birth_date) > new Date(Date.now() - 18 * 365.25 * 864e5))]);
       await client.query('COMMIT');
       user = rows[0];
     } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e.code === '23505') return res.status(409).json({ error: 'Please try again' }); throw e; } finally { client.release(); }
@@ -212,6 +261,7 @@ export function createApp() {
     if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
     await q('UPDATE users SET email_verified_at = now() WHERE id = $1', [u.id]);
     await createSession(res, u.id, req.get('user-agent'), req, 'signup'); // auto-login after verification
+    await loginAlert(u.id, req.get('user-agent'));
     if (u.email) sendMail({ to: u.email, subject: 'Welcome to Connectly', text: welcomeText(u.full_name) }).catch((e) => console.error('[welcome]', e.message));
     res.json({ ok: true });
   });
@@ -241,7 +291,10 @@ export function createApp() {
     if (sus[0]?.suspended_at) return res.status(403).json({ error: 'This account has been suspended for breaking the Community Standards.', code: 'SUSPENDED' });
     const reactivated = Boolean(hit.deactivated_at);
     if (reactivated) await q('UPDATE users SET deactivated_at = NULL WHERE id = $1', [hit.id]);
+    const tw = await twoStepMethods(hit.id);
+    if (tw) return res.json(await startTwoStep(hit.id, req.get('user-agent'), tw));
     await createSession(res, hit.id, req.get('user-agent'), req);
+    await loginAlert(hit.id, req.get('user-agent'));
     res.json({ ok: true, reactivated });
   });
 
@@ -293,7 +346,7 @@ export function createApp() {
 
   api.get('/me', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT * FROM users WHERE id = $1', [req.user.id]);
-    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility, theme_pref: rows[0].theme_pref,
+    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility, theme_pref: rows[0].theme_pref, locale: rows[0].locale, text_scale: rows[0].text_scale ?? null, hide_like_counts: rows[0].hide_like_counts, two_step: !!rows[0].totp_enabled_at || rows[0].two_step_email,
       acting_as: req.user.acting_space_id ? (await q('SELECT id, slug, name, photo_path FROM spaces WHERE id = $1', [req.user.acting_space_id])).rows[0] || null : null,
       unread_notifications: (await q('SELECT count(*) AS n FROM notifications WHERE user_id = $1 AND read_at IS NULL', [req.user.id])).rows[0].n, current_place_id: rows[0].current_place_id, hometown_place_id: rows[0].hometown_place_id, roles: req.user.roles });
   });
@@ -350,7 +403,11 @@ export function createApp() {
     const pu = publicUser(u);
     const canDetails = u.id === me || u.profile_details_visibility === 'public' || (u.profile_details_visibility === 'friends' && (rel.friend_status === 'friends' || (rel.following && rel.follows_me)));
     if (!canDetails) for (const k of ['bio', 'location', 'hometown', 'relationship_status', 'work_company', 'work_role', 'education']) pu[k] = ''; if (!canDetails) pu.interests = [];
-    res.json({ ...pu, post_count: c[0].n, is_me: u.id === me, friend_status: rel.friend_status || 'none', following: rel.following, follower_count: Number(rel.follower_count), following_count: Number(rel.following_count), follows_me: rel.follows_me, friend_count: rel.friend_count, tier: config.features.subscriptions ? ((await q("SELECT tier FROM user_subscriptions WHERE user_id = $1 AND status = 'active'", [u.id])).rows[0]?.tier || 'free') : null });
+    const teenBlock = config.features.teenSafety && u.birth_date && new Date(u.birth_date) > new Date(Date.now() - 18 * 365.25 * 864e5) && !rel.follows_me && !(req.user.birth_date && new Date(req.user.birth_date) > new Date(Date.now() - 18 * 365.25 * 864e5));
+    const can_message = config.features.messages && u.id !== me && !teenBlock && (u.dm_privacy === 'everyone' || (u.dm_privacy === 'following' && rel.follows_me));
+    const locked = u.is_private && u.id !== me && !rel.following;
+    const requested = locked ? (await q('SELECT 1 FROM follow_requests WHERE requester_id = $1 AND target_id = $2', [me, u.id])).rowCount > 0 : false;
+    res.json({ ...pu, can_message, is_private: !!u.is_private, locked, requested, lists_hidden: u.id !== me && (!!u.hide_follow_lists || locked), post_count: c[0].n, is_me: u.id === me, friend_status: rel.friend_status || 'none', following: rel.following, follower_count: Number(rel.follower_count), following_count: Number(rel.following_count), follows_me: rel.follows_me, friend_count: rel.friend_count, tier: config.features.subscriptions ? ((await q("SELECT tier FROM user_subscriptions WHERE user_id = $1 AND status = 'active'", [u.id])).rows[0]?.tier || 'free') : null });
   });
   api.get('/users/:username/posts', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT id FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL', [req.params.username]);
@@ -362,7 +419,7 @@ export function createApp() {
   // Home feed is follow-based: me, people I follow and spaces I belong to. With no follows yet, show public posts to discover people.
   const FEED_SCOPE = `p.kind = 'post' AND (p.author_id = $1 OR EXISTS (SELECT 1 FROM follows ff WHERE ff.follower_id = $1 AND ff.followee_id = p.author_id)
     OR (p.space_id IS NOT NULL AND EXISTS (SELECT 1 FROM space_members sm WHERE sm.user_id = $1 AND sm.space_id = p.space_id))
-    OR NOT EXISTS (SELECT 1 FROM follows f0 WHERE f0.follower_id = $1))`;
+    OR NOT EXISTS (SELECT 1 FROM follows f0 WHERE f0.follower_id = $1)) AND NOT EXISTS (SELECT 1 FROM mutes mu WHERE mu.user_id = $1 AND mu.target_id = p.author_id AND mu.posts)`;
   api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, FEED_SCOPE, [], req.query.cursor, req.query.limit)));
   api.post('/posts', requireVerified, upload.single('image'), async (req, res) => {
     const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined, feeling: req.body?.feeling || undefined, location_tag: req.body?.location_tag || undefined, as_draft: req.body?.as_draft || undefined, enhance: req.body?.enhance || undefined });
@@ -379,6 +436,7 @@ export function createApp() {
     }
     const img = req.file ? await saveImage(req.file.buffer, 'post', { enhance: req.body?.enhance === '1' }) : null;
     const { rows } = await q('INSERT INTO posts (author_id, body, image_path, visibility, space_id, as_space_id, feeling, location_tag, is_draft) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [req.user.id, d.body, img, d.visibility, spaceId, asSpace, d.feeling, d.location_tag, d.as_draft === '1']);
+    await applyPostExtras(req, rows[0].id, d.body);
     res.status(201).json(await getOwnPost(req.user.id, rows[0].id));
   });
   api.get('/posts/:id', requireAuth, async (req, res) => {
@@ -400,6 +458,7 @@ export function createApp() {
     if (!body && !image && !post.video_path) return res.status(400).json({ error: 'A post needs text or a photo' });
     await q('UPDATE posts SET body = $1, image_path = $2, visibility = COALESCE($3, visibility), feeling = COALESCE($6, feeling), location_tag = COALESCE($7, location_tag), updated_at = now() WHERE id = $4 AND author_id = $5', [body, image, d.visibility ?? null, post.id, req.user.id, d.feeling ?? null, d.location_tag ?? null]);
     if (d.remove_image) removeImage(post.image_path);
+    if (config.features.hashtags && d.body !== undefined) { await q('DELETE FROM post_hashtags WHERE post_id = $1', [post.id]); await saveTags(post.id, body); }
     res.json(await getOwnPost(req.user.id, post.id));
   });
   api.delete('/posts/:id', requireAuth, async (req, res) => {
@@ -433,7 +492,18 @@ export function createApp() {
       FROM comments c JOIN users u ON u.id = c.author_id AND u.deactivated_at IS NULL WHERE c.post_id = $1
        AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $2 AND b.blocked_id = c.author_id) OR (b.blocker_id = c.author_id AND b.blocked_id = $2))
       ORDER BY c.id ASC LIMIT 500`, [p.id, req.user.id]);
-    res.json({ items: rows });
+    // Restricted people's comments are only visible to them (and flagged for the post owner); hidden-word matches are tucked away.
+    const { rows: [own] } = await q('SELECT author_id FROM posts WHERE id = $1', [p.id]);
+    const restricted = config.features.restrictMute ? new Set((await q('SELECT target_id FROM restricts WHERE user_id = $1', [own.author_id])).rows.map((r) => r.target_id)) : new Set();
+    const words = config.features.hiddenWords ? await hiddenWordsOf(own.author_id) : null;
+    const items = [];
+    for (const c of rows) {
+      const isOwner = own.author_id === req.user.id;
+      if (restricted.has(c.author.id) && !c.is_mine) { if (isOwner) items.push({ ...c, restricted: true }); continue; }
+      if (words && !c.is_mine && matchesHidden(c.body, words)) { if (isOwner) items.push({ ...c, hidden: true }); continue; }
+      items.push(c);
+    }
+    res.json({ items });
   });
   api.post('/posts/:id/comments', requireVerified, async (req, res) => {
     const d = CommentSchema.parse(req.body);
@@ -445,10 +515,12 @@ export function createApp() {
       if (!rows[0]) return res.status(400).json({ error: 'Parent comment not found on this post' });
       parent = rows[0].parent_id || rows[0].id; // replies are one level deep
     }
+    { const { rows: [o] } = await q('SELECT author_id FROM posts WHERE id = $1', [p.id]); if (!(await allowedBy(o.author_id, req.user.id, 'who_can_comment'))) return res.status(403).json({ error: 'Comments are limited on this post' }); }
     const asSpace = await actingPage(req);
     const { rows } = await q('INSERT INTO comments (post_id, author_id, parent_id, body, as_space_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, post_id, parent_id, body, created_at', [p.id, req.user.id, parent, d.body, asSpace]);
     const { rows: own } = await q('SELECT author_id FROM posts WHERE id = $1', [p.id]);
-    await notify(own[0].author_id, req.user.id, parent ? 'reply' : 'comment', { post_id: p.id, comment_id: rows[0].id });
+    if (!(await isRestricted(own[0].author_id, req.user.id))) await notify(own[0].author_id, req.user.id, parent ? 'reply' : 'comment', { post_id: p.id, comment_id: rows[0].id });
+    await notifyMentions(d.body, req.user.id, 'mention', { post_id: p.id, comment_id: rows[0].id });
     if (parent) { const { rows: pc } = await q('SELECT author_id FROM comments WHERE id = $1', [parent]); if (pc[0] && pc[0].author_id !== own[0].author_id) await notify(pc[0].author_id, req.user.id, 'reply', { post_id: p.id, comment_id: rows[0].id }); }
     res.status(201).json({ ...rows[0], is_mine: true, author: { id: req.user.id, username: req.user.username, full_name: req.user.full_name } });
   });
@@ -542,11 +614,13 @@ export function createApp() {
   api.get('/search', requireAuth, async (req, res) => {
     const { q: term, type, cursor } = z.object({ q: z.string().trim().min(1).max(100), type: z.enum(['people', 'posts', 'pages', 'groups', 'communities']).default('people'), cursor: z.string().optional(), limit: z.string().optional() }).parse(req.query);
     const like = '%' + term.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+    if (!cursor && !/@|^\+?\d[\d\s-]{5,}$/.test(term)) recordSearch(req.user.id, term); // never store email/phone lookups
     if (type === 'people') {
       const { rows } = await q(`SELECT id, username, full_name, avatar_path, bio FROM users
-        WHERE email_verified_at IS NOT NULL AND deactivated_at IS NULL AND (lower(username) || ' ' || lower(full_name)) LIKE $1
+        WHERE email_verified_at IS NOT NULL AND deactivated_at IS NULL AND ((lower(username) || ' ' || lower(full_name)) LIKE $1
+          OR ($4 AND discover_by_email AND lower(email) = lower($2)) OR ($4 AND discover_by_phone AND length($5) >= 7 AND regexp_replace(coalesce(phone, ''), '\D', '', 'g') LIKE '%' || $5))
         AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $3 AND b.blocked_id = users.id) OR (b.blocker_id = users.id AND b.blocked_id = $3))
-        ORDER BY (lower(username) = lower($2)) DESC, (lower(username) LIKE lower($2) || '%') DESC, full_name LIMIT 20`, [like, term, req.user.id]);
+        ORDER BY (lower(username) = lower($2)) DESC, (lower(username) LIKE lower($2) || '%') DESC, full_name LIMIT 20`, [like, term, req.user.id, config.features.discoverability, term.replace(/\D/g, '')]);
       return res.json({ items: rows, next_cursor: null });
     }
     if (type !== 'posts') {
@@ -558,11 +632,17 @@ export function createApp() {
     res.json(await pagePosts(req.user.id, 'lower(p.body) LIKE $2', [like], cursor, req.query.limit));
   });
   registerSocial(api, { requireAuth, requireVerified, id, pagePosts, checkPassword, BCRYPT_COST, config });
-  registerReels(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility });
+  registerReels(api, { applyPostExtras, requireAuth, requireVerified, id, pagePosts, getVisiblePost, actingPage, Visibility });
   registerAi(api, { requireAuth, id });
   registerSubscriptions(api, { requireAuth, requireAdmin, id });
   registerEngagement(api, { requireAuth, id, getVisiblePost, writeLimiter });
   registerLive(api, { requireAuth, requireVerified, requireModerator, id, notify });
+  registerMessages(api, { requireAuth, requireVerified, id });
+  registerRound7(api, { requireAuth, requireVerified, requireAdmin, id, pagePosts, getVisiblePost, notify, createSession, codeLimiter });
+  registerRound8(api, { requireAuth, requireVerified, requireAdmin, id, pagePosts, getVisiblePost });
+  registerRound9(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost });
+  registerNews(api, { requireAuth });
+  registerBackfill(api, { requireAuth });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
   // ---------- reports & moderation ----------

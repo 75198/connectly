@@ -42,11 +42,25 @@ export function Login() {
   const { refresh } = useSession(); const nav = useNavigate();
   const [sp] = useSearchParams();
   const [login, setLogin] = useState(sp.get('u') || ''); const [country, setCountry] = useState('NG'); const [password, setPassword] = useState('');
+  const [two, setTwo] = useState<{ ticket: string; methods: string[]; email_hint: string | null } | null>(null); const [method, setMethod] = useState('totp'); const [code2, setCode2] = useState('');
   const f = useForm(async () => {
-    try { const r = await api<{ reactivated: boolean }>('/auth/login', { json: { login, password, country } }); if (r.reactivated) alert('Welcome back! Your account has been reactivated.'); }
+    if (two) { await api('/auth/login/two-step', { json: { ticket: two.ticket, method, code: code2 } }); await refresh(); nav('/'); return; }
+    try { const r = await api<{ reactivated?: boolean; two_step?: boolean; ticket: string; methods: string[]; email_hint: string | null }>('/auth/login', { json: { login, password, country } });
+      if (r.two_step) { setTwo(r); setMethod(r.methods.includes('totp') ? 'totp' : 'email'); return; }
+      if (r.reactivated) alert('Welcome back! Your account has been reactivated.'); }
     catch (e) { if (e instanceof ApiError && e.status === 403) { nav(`/signup?verify=${encodeURIComponent(login)}&country=${country}`); return; } throw e; }
     await refresh(); nav('/');
   });
+  if (two) return <AuthShell title="Confirm it’s you">
+    <form className="stack" onSubmit={f.submit}>
+      <p className="meta">{method === 'totp' ? 'Enter the 6-digit code from your authenticator app.' : `We sent a code to ${two.email_hint}.`}</p>
+      <input inputMode="numeric" autoComplete="one-time-code" autoFocus value={code2} onChange={(e) => setCode2(e.target.value.replace(/\D/g, '').slice(0, 6))} aria-label="6-digit code" placeholder="6-digit code" className="codefield" />
+      {f.err && <p className="error" role="alert">{f.err}</p>}
+      <button className="btn primary block" disabled={f.busy || code2.length !== 6}>{f.busy ? 'Checking…' : 'Continue'}</button>
+      {two.methods.length > 1 && <button type="button" className="linkish" onClick={() => { setMethod(method === 'totp' ? 'email' : 'totp'); setCode2(''); }}>{method === 'totp' ? 'Use an email code instead' : 'Use my authenticator app instead'}</button>}
+      {method === 'email' && <button type="button" className="linkish" onClick={() => api('/auth/login/two-step/resend', { json: { ticket: two.ticket } }).then(() => alert('New code sent')).catch((e) => alert(e.message))}>Send a new code</button>}
+      <button type="button" className="linkish" onClick={() => { setTwo(null); setCode2(''); }}>Back to log in</button>
+    </form></AuthShell>;
   return <AuthShell title="Log in">
     <SavedAccounts />
     <form className="stack" onSubmit={f.submit}>

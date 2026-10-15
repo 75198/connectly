@@ -2,6 +2,7 @@
 // Comments/reactions/viewer count come from our API (polled), so moderation and blocks apply server-side.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { sfx } from '../lib/sounds';
 import { Room, RoomEvent, Track, createLocalTracks, VideoPresets, type LocalVideoTrack, type LocalAudioTrack, type RemoteTrack } from 'livekit-client';
 import { api, getFeatures, toast } from '../api';
 import { useSession } from '../session';
@@ -53,6 +54,7 @@ function Overlay({ id, comments, viewers, floaters, onReact, onComment, mine }: 
       {!mine && <div className="livereacts">{REACTS.slice(3).map((r) => <button type="button" key={r} className="livereact" onClick={() => onReact(r)}>{r}</button>)}</div>}
     </div>
     <span className="liveviewers">👁 {viewers}</span>
+    <LiveGifts id={id} mine={mine} />
   </>;
 }
 
@@ -169,3 +171,21 @@ export function WatchLive() {
   </div>;
 }
 
+
+// Live gifts (round 8, FEATURE_GIFTS). Coins only: purchase is "Coming soon"; admins can grant coins for testing.
+function LiveGifts({ id, mine }: { id: number; mine: boolean }) {
+  const [on, setOn] = useState(false); const [open, setOpen] = useState(false); const [w, setW] = useState<any>(null); const [shown, setShown] = useState<any[]>([]); const last = useRef(0);
+  useEffect(() => { getFeatures().then((f) => setOn(!!f.gifts)); }, []);
+  useEffect(() => { if (!on) return; let first = true; const tick = () => api<{ items: any[] }>(`/live/${id}/gifts?after=${last.current}`).then((r) => { if (r.items.length) { last.current = r.items[r.items.length - 1].id; if (!first) { setShown((x) => [...x, ...r.items].slice(-4)); sfx('gift'); setTimeout(() => setShown((x) => x.slice(r.items.length)), 4000); } } first = false; }).catch(() => {}); tick(); const i = setInterval(tick, 2500); return () => clearInterval(i); }, [on, id]);
+  if (!on) return null;
+  const openSheet = () => { setOpen(true); api('/coins').then(setW).catch(() => {}); };
+  const send = async (g: any) => { try { const r = await api<{ balance: number }>(`/live/${id}/gifts`, { json: { gift: g.key } }); setW({ ...w, balance: r.balance }); sfx('gift'); setShown((x) => [...x, { id: Date.now(), gift: g.key, sender: { full_name: 'You' } }].slice(-4)); toast(`${g.emoji} ${g.name} sent`); } catch (e: any) { toast(e.message, 'err'); } };
+  const emoji = (k: string) => w?.gifts?.find((g: any) => g.key === k)?.emoji || ({ rose: '🌹', heart: '💖', star: '🌟', cake: '🎂', trophy: '🏆', rocket: '🚀', crown: '👑', diamond: '💎' } as any)[k] || '🎁';
+  return <>
+    <div className="giftfeed" aria-live="polite">{shown.map((g) => <div key={g.id} className="giftpop"><span>{emoji(g.gift)}</span><b>{g.sender.full_name}</b> sent a gift</div>)}</div>
+    {!mine && <button className="giftbtn" aria-label="Send a gift" onClick={openSheet}>🎁</button>}
+    {open && <div className="sheetwrap" onClick={() => setOpen(false)}><div className="sheet giftsheet" onClick={(e) => e.stopPropagation()}><div className="sheethead"><h3>Send a gift</h3><span className="coinbal">🪙 {w?.balance ?? '…'}</span></div>
+      <div className="giftgrid">{(w?.gifts || []).map((g: any) => <button key={g.key} className="gifttile" disabled={(w?.balance ?? 0) < g.coins} onClick={() => send(g)}><span>{g.emoji}</span><b>{g.name}</b><small>🪙 {g.coins}</small></button>)}</div>
+      <button className="btn ghost block" onClick={() => toast('Buying coins is coming soon.')}>Get coins · Coming soon</button></div></div>}
+  </>;
+}

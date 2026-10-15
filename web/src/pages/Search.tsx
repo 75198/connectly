@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, getFeatures } from '../api';
+import { api, getFeatures, useFeatures, type Track } from '../api';
 import { Avatar, Icon } from '../components/ui';
 import { PostList, usePosts } from '../components/PostList';
+import { PostCard } from '../components/PostCard';
+import { NewsSection } from '../components/News';
+import type { Post } from '../api';
 
 type Person = { id: number; username: string; full_name: string; avatar_path: string | null; bio: string };
 
@@ -21,6 +24,8 @@ export function Search() {
       <div className="tabs scrolltabs" role="tablist">{TYPES.map((t) => <button key={t} role="tab" aria-selected={type === t} className={type === t ? 'active' : ''} onClick={() => setType(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}</div>
     </div>
     {ai && text.trim().length >= 2 && <Link to={`/assistant?q=${encodeURIComponent(text.trim())}`} className="card person aientry askai"><span className="aiorb sm">✦</span><span className="grow"><b>Ask Connectly AI</b><small className="meta">“{text.trim()}”</small></span><Icon name="chev" /></Link>}
+    {!q && <Trending />}
+    {!q && <SearchNews />}
     {!q ? <Discover onPick={(t, ty) => { setText(t); setSp({ q: t, type: ty || type }, { replace: true }); }} /> : type === 'people' ? <People q={q} /> : type === 'posts' ? <Posts q={q} /> : <Spaces q={q} type={type} />}
   </div>;
 }
@@ -69,4 +74,24 @@ function Discover({ onPick }: { onPick: (q: string, type?: string) => void }) {
     {ai && <Link to="/assistant" className="card person aientry"><span className="aiorb sm">✦</span><span className="grow"><b>Ask Connectly AI</b><small className="meta">Ideas, captions, translations, answers and app help</small></span><Icon name="chev" /></Link>}
     <section className="card"><h3>Trending searches</h3><div className="chiprow wrap">{IDEAS.map((t) => <button key={t} className="chip" onClick={() => onPick(t)}>🔥 {t}</button>)}</div></section>
   </div>;
+}
+
+// Trending topics, challenges and sounds (round 7/8).
+function Trending() {
+  const f = useFeatures(); const [tags, setTags] = useState<{ tag: string; posts: number }[]>([]); const [ch, setCh] = useState<any[]>([]); const [snd, setSnd] = useState<Track[]>([]);
+  useEffect(() => { if (f?.hashtags) api<{ items: any[] }>('/trending').then((r) => setTags(r.items)).catch(() => {});
+    if (f?.challenges) api<{ items: any[] }>('/challenges').then((r) => setCh(r.items.slice(0, 6))).catch(() => {});
+    if (f?.music) api<{ items: Track[] }>('/music/trending').then((r) => setSnd(r.items.filter((t) => (t.uses || 0) > 0).slice(0, 5))).catch(() => {}); }, [f]);
+  if (!tags.length && !ch.length && !snd.length && !f?.events) return null;
+  return <>{tags.length > 0 && <div className="card trending"><h3>🔥 Trending</h3>{tags.map((t, i) => <Link key={t.tag} to={`/tag/${encodeURIComponent(t.tag)}`} className="row trendrow"><span className="trendrank">{i + 1}</span><span className="grow"><b>#{t.tag}</b><small className="meta">{t.posts === 1 ? '1 post' : `${t.posts} posts`}</small></span></Link>)}</div>}
+    {ch.length > 0 && <div className="card"><div className="row between"><h3>🏆 Challenges</h3><Link to="/challenges">See all</Link></div><div className="hscroll">{ch.map((c) => <Link key={c.id} to={`/tag/${c.tag}`} className="chip">#{c.tag}</Link>)}</div></div>}
+    {snd.length > 0 && <div className="card"><h3>🎵 Trending sounds</h3>{snd.map((t) => <Link key={t.id} to={`/sound/${t.id}`} className="row trendrow"><span className="trendrank">♫</span><span className="grow"><b>{t.title}</b><small className="meta">{t.artist}</small></span></Link>)}</div>}
+    {f?.events && <Link to="/events" className="card row"><span className="reqicon">📅</span><span className="grow"><b>Events</b><small className="meta">See what’s happening near you</small></span></Link>}</>;
+}
+
+function SearchNews() {
+  const f = useFeatures(); const [posts, setPosts] = useState<Post[]>([]);
+  useEffect(() => { if (f?.news) api<{ items: Post[] }>(f.for_you ? '/feed/for-you?limit=3' : '/feed?limit=3').then((r) => setPosts(r.items.slice(0, 3))).catch(() => {}); }, [f?.news, f?.for_you]);
+  if (!f?.news) return null;
+  return <><NewsSection on />{posts.length > 0 && <section className="stack"><h3>Suggested posts</h3>{posts.map((p) => <PostCard key={p.id} post={p} onChange={(np) => setPosts((x) => x.map((y) => (y.id === np.id ? np : y)))} onDelete={(id) => setPosts((x) => x.filter((y) => y.id !== id))} />)}</section>}</>;
 }

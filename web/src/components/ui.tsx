@@ -13,7 +13,7 @@ export function Avatar({ user, size = 40 }: { user: Pick<Author, 'full_name' | '
 export function UserLink({ user }: { user: Author }) {
   return <Link to={authorHref(user)} className="ulink">{user.full_name}</Link>;
 }
-export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' | 'search' | 'bell' | 'pin' | 'shop' | 'flag' | 'x' | 'back' | 'chev' | 'reel' | 'share' | 'eye' | 'volume' | 'mute' | 'play' | 'bookmark' | 'clock' | 'trash' | 'sliders' }) {
+export function Icon({ name }: { name: 'home' | 'mic' | 'user' | 'plus' | 'gear' | 'shield' | 'sun' | 'moon' | 'heart' | 'heartFill' | 'chat' | 'globe' | 'users' | 'lock' | 'logout' | 'image' | 'more' | 'search' | 'bell' | 'pin' | 'shop' | 'flag' | 'x' | 'back' | 'chev' | 'reel' | 'share' | 'eye' | 'volume' | 'mute' | 'play' | 'bookmark' | 'clock' | 'trash' | 'sliders' }) {
   const p: Record<string, JSX.Element> = {
     home: <path d="M3 11l9-8 9 8v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z" />,
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
@@ -29,6 +29,7 @@ export function Icon({ name }: { name: 'home' | 'user' | 'plus' | 'gear' | 'shie
     users: <><circle cx="9" cy="8" r="3.5" /><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5M16 4.5a3.5 3.5 0 010 7M18 14.5c2.5.5 4 2.5 4 5.5" /></>,
     lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 018 0v3" /></>,
     logout: <path d="M15 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4M10 8l-4 4 4 4M6 12h11" />,
+    mic: <><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>,
     shop: <><path d="M4 9h16l-1.2 10.2a1 1 0 01-1 .8H6.2a1 1 0 01-1-.8z" /><path d="M8.5 9V7a3.5 3.5 0 017 0v2" /></>,
     flag: <><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></>,

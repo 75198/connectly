@@ -1,3 +1,4 @@
+import { applyTextScale } from './lib/textsize';
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { api, User } from './api';
 import { applyTheme, ThemeMode } from './brand';
@@ -20,7 +21,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const theme = resolve(themePref, sysDark);
   useEffect(() => applyTheme(theme), [theme]);
   const refresh = useCallback(async () => {
-    try { const u = await api<User>('/me'); setMe(u); if (u.theme_pref) { setPref(u.theme_pref); localStorage.setItem('cx-theme', u.theme_pref); } } catch { setMe(null); } finally { setLoading(false); }
+    try { const u = await api<User>('/me'); setMe(u); applyTextScale(u.text_scale ?? null); if (u.theme_pref) { setPref(u.theme_pref); localStorage.setItem('cx-theme', u.theme_pref); } } catch { setMe(null); } finally { setLoading(false); }
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
   const logout = async (save = false) => { await api('/auth/logout', { json: { save } }); setMe(null); };

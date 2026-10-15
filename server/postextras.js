@@ -1,6 +1,7 @@
 // Drafts, Recently deleted (30-day soft delete), saved posts and 24h stories.
 import { z } from 'zod';
 import { q } from './db.js';
+import { config } from './config.js';
 import { upload, saveImage, removeImage } from './uploads.js';
 
 export const DELETED_RETENTION_DAYS = 30;
@@ -74,23 +75,29 @@ export function registerPostExtras(api, { requireAuth, requireVerified, id, getV
   });
   // stories: photo + caption, visible 24h to the author, their friends and people who follow them
   api.get('/stories', requireAuth, async (req, res) => {
-    const { rows } = await q(`SELECT s.id, s.image_path, s.caption, s.created_at, s.expires_at,
+    const { rows } = await q(`SELECT s.id, s.image_path, s.caption, s.created_at, s.expires_at, s.audience,
+        COALESCE(s.add_yours, (SELECT r.add_yours FROM stories r WHERE r.id = s.add_yours_of)) AS add_yours, COALESCE(s.add_yours_of, CASE WHEN s.add_yours IS NOT NULL THEN s.id END) AS ay_root,
+        (SELECT count(*)::int FROM stories x WHERE x.add_yours_of = COALESCE(s.add_yours_of, s.id) AND x.expires_at > now()) AS add_yours_count,
+        (SELECT row_to_json(mt) FROM (SELECT t.id, t.title, t.artist, t.url FROM music_tracks t WHERE t.id = s.music_track_id) mt) AS music,
         json_build_object('id', u.id, 'username', u.username, 'full_name', u.full_name, 'avatar_path', u.avatar_path) AS author
       FROM stories s JOIN users u ON u.id = s.author_id AND u.deactivated_at IS NULL AND u.suspended_at IS NULL
       WHERE s.expires_at > now() AND (s.author_id = $1
         OR EXISTS (SELECT 1 FROM friendships f WHERE f.status = 'accepted' AND ((f.requester_id = $1 AND f.addressee_id = s.author_id) OR (f.addressee_id = $1 AND f.requester_id = s.author_id)))
         OR EXISTS (SELECT 1 FROM follows fo WHERE fo.follower_id = $1 AND fo.followee_id = s.author_id))
+        AND (s.audience <> 'close_friends' OR s.author_id = $1 OR EXISTS (SELECT 1 FROM close_friends cf WHERE cf.user_id = s.author_id AND cf.friend_id = $1))
         AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = s.author_id) OR (b.blocker_id = s.author_id AND b.blocked_id = $1))
+        AND NOT EXISTS (SELECT 1 FROM mutes mu WHERE mu.user_id = $1 AND mu.target_id = s.author_id AND mu.stories)
       ORDER BY (s.author_id = $1) DESC, s.created_at ASC LIMIT 300`, [req.user.id]);
     const groups = new Map();
-    for (const r of rows) { const k = r.author.id; if (!groups.has(k)) groups.set(k, { author: r.author, items: [] }); groups.get(k).items.push({ id: r.id, image_path: r.image_path, caption: r.caption, created_at: r.created_at, expires_at: r.expires_at }); }
+    for (const r of rows) { const k = r.author.id; if (!groups.has(k)) groups.set(k, { author: r.author, items: [] }); groups.get(k).items.push({ id: r.id, image_path: r.image_path, caption: r.caption, created_at: r.created_at, expires_at: r.expires_at, audience: r.audience, music: r.music, add_yours: r.add_yours, add_yours_of: r.ay_root, add_yours_count: r.add_yours_count }); }
     res.json({ items: [...groups.values()] });
   });
   api.post('/stories', requireVerified, upload.single('image'), async (req, res) => {
-    const d = z.object({ caption: z.string().trim().max(200).default(''), enhance: z.enum(['0', '1']).optional() }).strict().parse({ caption: req.body?.caption || undefined, enhance: req.body?.enhance || undefined });
+    const d = z.object({ caption: z.string().trim().max(200).default(''), enhance: z.enum(['0', '1']).optional(), audience: z.enum(['all', 'close_friends']).default('all'), music_track_id: z.coerce.number().int().positive().optional(), add_yours: z.string().trim().max(80).optional(), add_yours_of: z.coerce.number().int().positive().optional() }).strict().parse({ add_yours: (config.features.addYours && req.body?.add_yours) || undefined, add_yours_of: (config.features.addYours && req.body?.add_yours_of) || undefined, caption: req.body?.caption || undefined, enhance: req.body?.enhance || undefined, audience: (config.features.closeFriends && req.body?.audience) || undefined, music_track_id: (config.features.music && req.body?.music_track_id) || undefined });
     if (!req.file) return res.status(400).json({ error: 'Choose a photo for your story' });
     const img = await saveImage(req.file.buffer, 'story', { enhance: d.enhance === '1' });
-    const { rows } = await q('INSERT INTO stories (author_id, image_path, caption) VALUES ($1,$2,$3) RETURNING id, image_path, caption, created_at, expires_at', [req.user.id, img, d.caption]);
+    const { rows } = await q(`INSERT INTO stories (author_id, image_path, caption, audience, music_track_id, add_yours, add_yours_of) VALUES ($1,$2,$3,$4,(SELECT id FROM music_tracks WHERE id = $5 AND active), $6,
+      (SELECT COALESCE(r.add_yours_of, r.id) FROM stories r WHERE r.id = $7)) RETURNING id, image_path, caption, created_at, expires_at, audience`, [req.user.id, img, d.caption, d.audience, d.music_track_id || null, d.add_yours || null, d.add_yours_of || null]);
     res.status(201).json(rows[0]);
   });
   api.delete('/stories/:id', requireAuth, async (req, res) => {
