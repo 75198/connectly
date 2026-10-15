@@ -19,7 +19,7 @@ export async function notify(userId, actorId, type, extra = {}) {
     const { rows } = await q(`SELECT u.email, u.email_notifications, u.inapp_notifications, a.full_name AS actor_name FROM users u, users a WHERE u.id = $1 AND a.id = $2
       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = u.id AND b.blocked_id = a.id) OR (b.blocker_id = a.id AND b.blocked_id = u.id))`, [userId, actorId]);
     const u = rows[0]; if (!u) return;
-    if (u.inapp_notifications) await q('INSERT INTO notifications (user_id, actor_id, type, post_id, comment_id, space_id) VALUES ($1,$2,$3,$4,$5,$6)', [userId, actorId, type, extra.post_id || null, extra.comment_id || null, extra.space_id || null]);
+    if (u.inapp_notifications) await q('INSERT INTO notifications (user_id, actor_id, type, post_id, comment_id, space_id, live_stream_id) VALUES ($1,$2,$3,$4,$5,$6,$7)', [userId, actorId, type, extra.post_id || null, extra.comment_id || null, extra.space_id || null, extra.live_stream_id || null]);
     if (EMAIL_TYPES[type] && u.email && u.email_notifications) {
       const [subject, line] = EMAIL_TYPES[type](u.actor_name);
       await sendMail({ to: u.email, subject, text: `${line}\n\nOpen Connectly: ${config.appUrl}/friends\n\nYou can turn off email notifications in Privacy and settings > Notifications.` });
@@ -124,7 +124,7 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
     const { rows } = await q(`SELECT n.id, n.type, n.post_id, n.created_at, n.read_at,
       json_build_object('username', a.username, 'full_name', a.full_name, 'avatar_path', a.avatar_path) AS actor,
       (SELECT left(body, 80) FROM posts WHERE id = n.post_id) AS post_snippet,
-      (SELECT json_build_object('slug', slug, 'name', name, 'kind', kind) FROM spaces WHERE id = n.space_id) AS space
+      (SELECT json_build_object('slug', slug, 'name', name, 'kind', kind) FROM spaces WHERE id = n.space_id) AS space, n.live_stream_id
       FROM notifications n JOIN users a ON a.id = n.actor_id AND a.deactivated_at IS NULL
       WHERE n.user_id = $1 AND ($2::bigint IS NULL OR n.id < $2) ORDER BY n.id DESC LIMIT 30`, [req.user.id, before]);
     res.json({ items: rows, next_cursor: rows.length === 30 ? String(rows[29].id) : null });

@@ -1,4 +1,4 @@
--- Round 6: in-app AI support chat (Connectly Assistant). Additive only: two new tables.
+-- Round 6: in-app AI support chat (Connectly AI). Additive only: two new tables.
 CREATE TABLE IF NOT EXISTS ai_conversations (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -60,7 +60,8 @@ Flags live in `server/config.js` → `config.features` and are read from env var
 | `FEATURE_SIGNUP_POW` | 1 | Require the proof-of-work bot check on `/api/auth/register` |
 | `FEATURE_REPORTS` | 1 | Enable `POST /api/reports` |
 | `FEATURE_REELS` | 1 | Reels API (`/api/reels*`) and the Reels entries in the Home header, sidebar and Create menu |
-| `FEATURE_AI_SUPPORT` | 0 | Connectly Assistant AI support chat (`/api/ai/*`, `/assistant`, entries in Profile hub and Search) |
+| `FEATURE_AI_SUPPORT` | 0 | Connectly AI AI support chat (`/api/ai/*`, `/assistant`, entries in Profile hub and Search) |
+| `FEATURE_LIVE` | 0 | Go Live video (`/api/live*`, `/live/new`, `/live/:id`, Create menu chip, Home live row, story rings) |
 | `FEATURE_WELCOME_HERO` | 1 | Animated video landing screen at `/` for logged-out visitors (off: `/` goes straight to Log in) |
 Flags the client needs are exposed read-only in `GET /api/auth/capabilities` → `features`.
 Other tunables: `POW_BITS` (default 17, about 1-3 s in a phone browser; raise it if bots get through).
@@ -120,7 +121,7 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
   It is used by the composer, stories, the reel cover and the profile photo.
 - Screenshots: `python3 scripts/round5b_screens.py http://localhost:3055 a.jpg b.jpg c.jpg` (light and dark) → `screenshots/round5/`.
 
-## 13. Connectly Assistant: AI support chat (round 6, migration 011)
+## 13. Connectly AI: AI support chat (round 6, migration 011)
 - Server proxy `server/ai.js`: `POST /api/ai/chat {conversation_id?, message}` calls Groq's OpenAI-compatible API (`GROQ_BASE_URL`, default `https://api.groq.com/openai/v1`; `GROQ_MODEL`, default `openai/gpt-oss-20b`) with `GROQ_API_KEY` from `.env`. The key is only ever on the server; it is never logged or sent to the browser. Replies stream back as NDJSON lines: `{conversation_id,title}`, then `{t}` deltas, then `{done,id}` or `{error,fallback:true}`.
 - History: new tables `ai_conversations` and `ai_messages` (additive). `GET /api/ai/conversations`, `GET /api/ai/conversations/:id` (own chats only), `GET /api/ai/status`. The last 12 messages are sent as context.
 - Limits (counted from `ai_messages`, so they survive restarts): `AI_USER_HOURLY` (default 30) per user per hour, `AI_DAILY_CAP` (default 900) for everyone per UTC day to stay inside the Groq free tier. Both return 429 with a friendly "try later" message.
@@ -128,3 +129,11 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - System prompt (`SYSTEM_PROMPT`): Connectly help only, never reveals other users' data, cannot take account actions, points serious issues to Report.
 - Client `web/src/pages/Assistant.tsx` at `/assistant` (full screen): bubbles, typing dots, suggested questions, new chat, history panel, light/dark via theme variables.
 - Tests: `tests/ai.test.js` uses a local mock Groq server.
+
+## 14. Go Live (round 6, migration 012)
+- Video runs on LiveKit Cloud (SFU). `server/live.js` mints short-lived JWTs with `livekit-server-sdk` from `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` in `.env` (never sent to the browser; only the per-room token is). The host gets `canPublish`, viewers get subscribe-only tokens. Without these vars, endpoints return 503 `LIVE_NOT_CONFIGURED`.
+- Tables: `live_streams` (one live per host, `ends_by` = start + `LIVE_MAX_MINUTES`), `live_participants` (presence + counted seconds), `live_comments`, `live_reactions`; nullable `notifications.live_stream_id` and `reports.live_stream_id`.
+- Who can watch: the host's friends and followers (blocks, suspensions and deactivations respected), the same audience as stories. Going live sends a `live` notification to them.
+- Free-tier guard rails: 60 min per live, 20 concurrent viewers (`LIVE_MAX_VIEWERS`), and a monthly participant-minute budget (`LIVE_MONTHLY_MINUTES`, default 4500 of LiveKit's 5000) counted from 15 s heartbeats. All return 429 with friendly text. `sweepLive()` ends lives past their limit or whose host has gone silent for 90 s.
+- Endpoints: `GET /live/status`, `GET /live`, `POST /live`, `GET /live/:id`, `POST /live/:id/join|heartbeat|leave|end|comments|reactions|report`, `GET /live/:id/events` (polled every 2 s). Moderation: `GET /admin/live`, `POST /admin/live/:id/end` (also closes the LiveKit room). Reports land in the normal queue as a user report tagged `[Live #id]`.
+- Client: `pages/Live.tsx` (GoLive: camera preview, front/back switch, mic mute, camera off, timer, End; WatchLive: video, LIVE badge, viewer count, comments, floating reactions, Report). It publishes with simulcast (180p/360p/720p) plus `adaptiveStream`/`dynacast`, so slow networks get a lower layer. `components/LiveRow.tsx` holds the Home row, story rings and admin panel and does not import livekit-client (that stays in the lazy Live chunk).

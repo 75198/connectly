@@ -60,7 +60,7 @@ test('chat streams via the server proxy, saves history, key never sent to the br
   assert.ok(ev.at(-1).done);
   assert.ok(!r.body.includes('test-key'));
   assert.equal(lastAuth, 'Bearer test-key');
-  assert.equal(lastBody.messages[0].role, 'system'); assert.match(lastBody.messages[0].content, /Connectly Assistant/);
+  assert.equal(lastBody.messages[0].role, 'system'); assert.match(lastBody.messages[0].content, /Connectly AI/);
   assert.equal(lastBody.messages.at(-1).content, 'How do I post?'); assert.equal(lastBody.stream, true);
   const list = await A.get('/api/ai/conversations'); assert.equal(list.body.items.length, 1); assert.equal(list.body.items[0].title, 'How do I post?');
   const conv = await A.get(`/api/ai/conversations/${ev[0].conversation_id}`);

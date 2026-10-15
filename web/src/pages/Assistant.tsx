@@ -1,4 +1,4 @@
-// Connectly Assistant: live AI support chat (round 6). Talks only to our server (/api/ai/*);
+// Connectly AI: live AI support chat (round 6). Talks only to our server (/api/ai/*);
 // replies stream in as NDJSON lines: {conversation_id} → {t: "..."}* → {done} | {error}.
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -41,7 +41,7 @@ export function Assistant() {
     const fail = (err: string) => setMsgs((m) => [...m.filter((x, i) => !(i === m.length - 1 && x.role === 'assistant' && !x.content)), { role: 'assistant', content: err, error: true }]);
     try {
       const res = await fetch('/api/ai/chat', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Connectly-CSRF': '1' }, body: JSON.stringify(convId ? { conversation_id: convId, message } : { message }) });
-      if (!res.ok || !res.body) { const d = await res.json().catch(() => ({})); throw new ApiError(res.status, d.error || 'Connectly Assistant is unavailable right now. Please try again later.'); }
+      if (!res.ok || !res.body) { const d = await res.json().catch(() => ({})); throw new ApiError(res.status, d.error || 'Connectly AI is unavailable right now. Please try again later.'); }
       const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''; let started = false;
       for (;;) {
         const { value, done } = await reader.read(); if (done) break;
@@ -66,7 +66,7 @@ export function Assistant() {
     <header className="aihead">
       <button className="btn icon ghost" aria-label="Back" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/me'))}><Icon name="back" /></button>
       <span className="aiorb">✦</span>
-      <div className="grow"><b>Connectly Assistant</b><small className="meta">{status && !status.available ? 'Offline · try again later' : typing ? 'Typing…' : 'AI support · replies instantly'}</small></div>
+      <div className="grow"><b>Connectly AI</b><small className="meta">{status && !status.available ? 'Offline · try again later' : typing ? 'Typing…' : 'AI support · replies instantly'}</small></div>
       <button className="btn icon ghost" aria-label="Chat history" onClick={() => { setShowHist((v) => !v); if (!history) loadHistory(); }}><Icon name="clock" /></button>
       <button className="btn icon ghost" aria-label="New chat" onClick={newChat}><Icon name="plus" /></button>
     </header>
@@ -87,12 +87,12 @@ export function Assistant() {
         <div className={`aibubble${m.error ? ' err' : ''}`}><Rich text={m.content} /></div>
         {m.role === 'user' && me ? <Avatar user={me} size={28} /> : null}
       </div>)}
-      {typing && <div className="airow assistant"><span className="aiorb sm">✦</span><div className="aibubble typingdots" aria-label="Assistant is typing"><i /><i /><i /></div></div>}
+      {typing && <div className="airow assistant"><span className="aiorb sm">✦</span><div className="aibubble typingdots" aria-label="Connectly AI is typing"><i /><i /><i /></div></div>}
       {notice && <p className="error card">{notice}</p>}
       <div ref={endRef} />
     </main>
     <form className="aiinput" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-      <textarea ref={inputRef} rows={1} value={text} maxLength={2000} placeholder={status?.available === false ? 'Assistant is offline right now' : 'Message Connectly Assistant'} aria-label="Message"
+      <textarea ref={inputRef} rows={1} value={text} maxLength={2000} placeholder={status?.available === false ? 'Connectly AI is offline right now' : 'Message Connectly AI'} aria-label="Message"
         onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(text); } }} disabled={status?.available === false} />
       <button className="btn primary aisend" aria-label="Send" disabled={busy || !text.trim()}>➤</button>
     </form>

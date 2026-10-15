@@ -20,6 +20,7 @@ export const config = {
     reports: (env.FEATURE_REPORTS ?? '1') !== '0',
     reels: (env.FEATURE_REELS ?? '1') !== '0',
     welcomeHero: (env.FEATURE_WELCOME_HERO ?? '1') !== '0',
+    live: (env.FEATURE_LIVE ?? '0') === '1',
     aiSupport: (env.FEATURE_AI_SUPPORT ?? '0') === '1',
   },
   powBits: Number(env.POW_BITS || (isTest ? 4 : 17)),
@@ -34,5 +35,12 @@ export const config = {
   groqModel: env.GROQ_MODEL || 'openai/gpt-oss-20b',
   aiUserHourly: Number(env.AI_USER_HOURLY || 30),
   aiDailyCap: Number(env.AI_DAILY_CAP || 900),
+  // Go Live (LiveKit Cloud free tier: 5,000 participant-minutes/month). Secrets only in .env.
+  livekitUrl: env.LIVEKIT_URL || '',
+  livekitApiKey: env.LIVEKIT_API_KEY || '',
+  livekitApiSecret: env.LIVEKIT_API_SECRET || '',
+  liveMaxMinutes: Number(env.LIVE_MAX_MINUTES || 60),
+  liveMaxViewers: Number(env.LIVE_MAX_VIEWERS || 20),
+  liveMonthlyMinutes: Number(env.LIVE_MONTHLY_MINUTES || 4500),
   ffprobePath: env.FFPROBE_PATH || 'ffprobe',
 };

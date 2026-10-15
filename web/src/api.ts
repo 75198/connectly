@@ -46,7 +46,7 @@ export function deviceName(ua: string | null) {
 }
 
 // Public feature flags (server: config.features). Cached for the page lifetime.
-export type Features = { reels: boolean; welcome_hero: boolean; ai_support?: boolean };
+export type Features = { reels: boolean; welcome_hero: boolean; ai_support?: boolean; live?: boolean };
 let featuresP: Promise<Features> | null = null;
 export function getFeatures(): Promise<Features> {
   if (!featuresP) featuresP = api<{ features?: Features }>('/auth/capabilities').then((c) => c.features || { reels: false, welcome_hero: false }).catch(() => { featuresP = null; return { reels: false, welcome_hero: false }; });

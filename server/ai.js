@@ -1,4 +1,4 @@
-// Connectly Assistant: in-app AI support chat (round 6, migration 011, flag FEATURE_AI_SUPPORT).
+// Connectly AI: in-app AI support chat (round 6, migration 011, flag FEATURE_AI_SUPPORT).
 // The browser talks only to this server; the server calls Groq's OpenAI-compatible API with the key
 // from .env (GROQ_API_KEY), so the key never reaches the client. Replies stream to the browser as NDJSON.
 // Limits: AI_USER_HOURLY messages per user per hour, AI_DAILY_CAP messages per UTC day for everyone.
@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { q } from './db.js';
 import { config } from './config.js';
 
-export const SYSTEM_PROMPT = `You are Connectly Assistant, the friendly in-app support helper for Connectly, a social app.
+export const SYSTEM_PROMPT = `You are Connectly AI, the friendly in-app support helper for Connectly, a social app.
 You help people use Connectly: creating posts (Home > "What's on your mind?" opens the composer with Photo/video, Camera, Feeling, Location and audience Public/Friends/Only me), drafts and Recently deleted (Profile hub; deleted posts can be restored for 30 days), reactions (long-press Like), saved posts, sharing, Reels (vertical videos up to 60 seconds; Create menu > Reel, or the Reels icon on Home), Stories (photo + caption, visible 24 hours to friends and followers), friends and follows, Pages/Groups/Communities, Marketplace, Search, notifications, privacy and settings (Profile > Privacy and settings: default post audience, profile details visibility, blocking, notifications, Appearance light/dark/system theme, sessions and "Sign out other devices"), account recovery (Log in screen > "Forgot password?" sends a 6-digit code to your email or phone; "Find your account" if you forgot the identifier), and reporting abuse (the ⋯ menu on a post or profile > Report; moderators review reports).
 Rules:
 - Be warm, concise and practical. Use short steps. Plain text or simple lists; no tables.
@@ -17,9 +17,9 @@ Rules:
 - If a question is unrelated to Connectly, answer briefly if harmless, then steer back to Connectly help.
 - If unsure how a feature works, say so rather than inventing details.`;
 
-export const FALLBACK = "Connectly Assistant is taking a short break right now. Please try again in a little while. Quick help: reset your password from Log in > \"Forgot password?\", change privacy in Profile > Privacy and settings, and for anything serious use the ⋯ menu > Report so an admin can help.";
+export const FALLBACK = "Connectly AI is taking a short break right now. Please try again in a little while. Quick help: reset your password from Log in > \"Forgot password?\", change privacy in Profile > Privacy and settings, and for anything serious use the ⋯ menu > Report so an admin can help.";
 const USER_LIMIT_MSG = "You've sent a lot of messages this hour 🙂 Please take a breather and try again a bit later.";
-const DAILY_LIMIT_MSG = "Connectly Assistant has been really busy today and reached its daily limit. Please try again tomorrow. For urgent problems, use the ⋯ menu > Report.";
+const DAILY_LIMIT_MSG = "Connectly AI has been really busy today and reached its daily limit. Please try again tomorrow. For urgent problems, use the ⋯ menu > Report.";
 
 const Chat = z.object({ conversation_id: z.coerce.number().int().positive().optional(), message: z.string().trim().min(1, 'Type a message').max(2000, 'Message is too long (2000 characters max)') }).strict();
 

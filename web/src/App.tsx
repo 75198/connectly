@@ -38,6 +38,8 @@ const Reels = lazy(() => import('./pages/Reels').then((m) => ({ default: m.Reels
 const NewReel = lazy(() => import('./pages/Reels').then((m) => ({ default: m.NewReel })));
 const MyPosts = lazy(() => import('./pages/MyPosts').then((m) => ({ default: m.MyPosts })));
 const Assistant = lazy(() => import('./pages/Assistant').then((m) => ({ default: m.Assistant })));
+const GoLive = lazy(() => import('./pages/Live').then((m) => ({ default: m.GoLive })));
+const WatchLive = lazy(() => import('./pages/Live').then((m) => ({ default: m.WatchLive })));
 const Search = lazy(() => import('./pages/Search').then((m) => ({ default: m.Search })));
 
 export function App() { return <SessionProvider><Router /><Toaster /></SessionProvider>; }
@@ -65,6 +67,7 @@ function Router() {
   </Routes></Suspense>;
   if (!me.onboarded && !['/terms', '/privacy'].includes(loc.pathname)) return <Suspense fallback={<Loading />}><Onboarding /></Suspense>;
   if (welcome && !['/terms', '/privacy'].includes(loc.pathname)) return <Suspense fallback={<Loading />}><Welcome onDone={() => { sessionStorage.removeItem(WELCOME_KEY); setWelcome(false); }} /></Suspense>;
+  if (/^\/live\/(new|\d+)$/.test(loc.pathname)) return <Suspense fallback={<Loading />}><Routes><Route path="/live/new" element={<GoLive />} /><Route path="/live/:id" element={<WatchLive />} /></Routes></Suspense>;
   if (loc.pathname === '/assistant') return <Suspense fallback={<Loading />}><Assistant /></Suspense>;
   if (/^\/reels(\/\d+)?$/.test(loc.pathname)) return <Suspense fallback={<Loading />}><Routes><Route path="/reels" element={<Reels />} /><Route path="/reels/:id" element={<Reels />} /></Routes></Suspense>;
   return <Layout><Suspense fallback={<Loading />}><Routes>

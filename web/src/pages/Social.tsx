@@ -5,15 +5,15 @@ import { useSession } from '../session';
 import { Avatar, Icon, ListSkeleton } from '../components/ui';
 import { PostCard } from '../components/PostCard';
 
-type N = { id: number; type: string; post_id: number | null; created_at: string; read_at: string | null; actor: { username: string; full_name: string; avatar_path: string | null }; post_snippet: string | null; space: { slug: string; name: string; kind: string } | null };
+type N = { id: number; type: string; post_id: number | null; created_at: string; read_at: string | null; actor: { username: string; full_name: string; avatar_path: string | null }; post_snippet: string | null; space: { slug: string; name: string; kind: string } | null; live_stream_id?: number | null };
 const TEXT: Record<string, (n: N) => string> = {
   friend_request: () => 'sent you a friend request', friend_accept: () => 'accepted your friend request', follow: () => 'started following you',
-  like: (n) => `liked your post${n.post_snippet ? `: “${n.post_snippet}”` : ''}`, comment: (n) => `commented on your post${n.post_snippet ? `: “${n.post_snippet}”` : ''}`,
+  live: () => 'is live now. Tap to watch.', like: (n) => `liked your post${n.post_snippet ? `: “${n.post_snippet}”` : ''}`, comment: (n) => `commented on your post${n.post_snippet ? `: “${n.post_snippet}”` : ''}`,
   reply: () => 'replied to a comment', page_follow: (n) => `followed your page ${n.space?.name || ''}`, group_join: (n) => `joined ${n.space?.name || 'your group'}`,
 };
-const hrefFor = (n: N) => n.post_id ? `/post/${n.post_id}` : n.space ? `/s/${n.space.slug}` : n.type.startsWith('friend') ? '/friends' : `/u/${n.actor.username}`;
+const hrefFor = (n: N) => n.live_stream_id ? `/live/${n.live_stream_id}` : n.post_id ? `/post/${n.post_id}` : n.space ? `/s/${n.space.slug}` : n.type.startsWith('friend') ? '/friends' : `/u/${n.actor.username}`;
 
-const BADGE: Record<string, [string, string]> = { like: ['❤️', '#F43F5E'], comment: ['💬', '#0EA5E9'], reply: ['💬', '#0EA5E9'], friend_request: ['👤', '#0F766E'], friend_accept: ['🤝', '#0F766E'], follow: ['➕', '#8B5CF6'], page_follow: ['⭐', '#F59E0B'], group_join: ['👥', '#10B981'] };
+const BADGE: Record<string, [string, string]> = { live: ['🔴', '#E11D48'], like: ['❤️', '#F43F5E'], comment: ['💬', '#0EA5E9'], reply: ['💬', '#0EA5E9'], friend_request: ['👤', '#0F766E'], friend_accept: ['🤝', '#0F766E'], follow: ['➕', '#8B5CF6'], page_follow: ['⭐', '#F59E0B'], group_join: ['👥', '#10B981'] };
 const FILTERS: [string, string, (n: N) => boolean][] = [['all', 'All', () => true], ['unread', 'Unread', (n) => !n.read_at], ['comments', 'Comments', (n) => n.type === 'comment' || n.type === 'reply'], ['likes', 'Likes', (n) => n.type === 'like'], ['people', 'Friends & follows', (n) => /friend|follow/.test(n.type)]];
 function bucket(iso: string) {
   const d = new Date(iso), n = new Date(); const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();

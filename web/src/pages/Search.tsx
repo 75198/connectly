@@ -64,7 +64,7 @@ function Discover({ onPick }: { onPick: (q: string, type?: string) => void }) {
         <button className="btn icon ghost" aria-label={`Remove ${r}`} onClick={() => { const n = recent.filter((x) => x !== r); localStorage.setItem(RKEY, JSON.stringify(n)); setRecent(n); }}><Icon name="x" /></button></div>)}</div></section>}
     {people && people.length > 0 && <section className="card"><h3>People you may know</h3><div className="hscroll">{people.map((p) => <Link key={p.id} to={`/u/${p.username}`} className="pcard"><Avatar user={p} size={64} /><b>{p.full_name}</b><small className="meta">@{p.username}</small></Link>)}</div></section>}
     <section><h3 className="grouphead">Browse</h3><div className="catgrid">{CATS.map(([k, l, e, c]) => <button key={k} className="catcard" style={{ ['--c' as any]: c }} onClick={() => onPick(IDEAS[CATS.findIndex((x) => x[0] === k)] || 'a', k)}><span>{e}</span><b>{l}</b></button>)}</div></section>
-    {ai && <Link to="/assistant" className="card person aientry"><span className="aiorb sm">✦</span><span className="grow"><b>Need help? Ask Connectly Assistant</b><small className="meta">Posting, reels, privacy, account recovery and more</small></span><Icon name="chev" /></Link>}
+    {ai && <Link to="/assistant" className="card person aientry"><span className="aiorb sm">✦</span><span className="grow"><b>Need help? Ask Connectly AI</b><small className="meta">Posting, reels, privacy, account recovery and more</small></span><Icon name="chev" /></Link>}
     <section className="card"><h3>Trending searches</h3><div className="chiprow wrap">{IDEAS.map((t) => <button key={t} className="chip" onClick={() => onPick(t)}>🔥 {t}</button>)}</div></section>
   </div>;
 }

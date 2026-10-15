@@ -3,6 +3,8 @@ import { api, postTime, toast, uploadForm } from '../api';
 import { useSession } from '../session';
 import { Avatar, Icon } from './ui';
 import { MediaStudio } from './MediaStudio';
+import { Link } from 'react-router-dom';
+import { useLiveNow } from './LiveRow';
 
 type Story = { id: number; image_path: string; caption: string; created_at: string };
 type Group = { author: { id: number; username: string; full_name: string; avatar_path: string | null }; items: Story[] };
@@ -10,6 +12,7 @@ type Group = { author: { id: number; username: string; full_name: string; avatar
 // 24-hour photo stories from you, your friends and people you follow.
 export function StoriesBar() {
   const { me } = useSession();
+  const liveNow = useLiveNow();
   const [groups, setGroups] = useState<Group[] | null>(null); const [open, setOpen] = useState<number | null>(null); const [busy, setBusy] = useState(false); const [studio, setStudio] = useState(false);
   const load = () => api<{ items: Group[] }>('/stories').then((r) => setGroups(r.items)).catch(() => setGroups([]));
   useEffect(() => { load(); }, []);
@@ -23,6 +26,7 @@ export function StoriesBar() {
   return <div className="stories" aria-label="Stories">
     <button className="story add" onClick={() => setStudio(true)}><span className="storyimg"><Avatar user={me} size={60} /><b className="storyplus">{busy ? '…' : '+'}</b></span><small>Your story</small></button>
     {studio && <MediaStudio onClose={() => setStudio(false)} onDone={(r) => { setStudio(false); add(r.file, r.enhance); }} />}
+    {liveNow.map((s) => <Link key={`l${s.id}`} to={`/live/${s.id}`} className="story"><span className="storyring livering"><Avatar user={s.host} size={58} /><span className="livebadge sm">LIVE</span></span><small>{s.is_mine ? 'You' : s.host.full_name.split(' ')[0]}</small></Link>)}
     {groups === null ? [0, 1, 2].map((i) => <span key={i} className="story"><span className="sk circle big" /><span className="sk line w60" /></span>)
       : groups.map((g, i) => <button key={g.author.id} className="story" onClick={() => setOpen(i)}><span className="storyring"><Avatar user={g.author} size={58} /></span><small>{g.author.id === me.id ? 'You' : g.author.full_name.split(' ')[0]}</small></button>)}
     {open !== null && groups && <StoryViewer groups={groups} start={open} onClose={() => setOpen(null)} onDeleted={load} />}

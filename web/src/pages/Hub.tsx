@@ -40,7 +40,7 @@ export function Hub() {
       <Link to="/me/deleted"><Icon name="trash" /> Recently deleted</Link>
       <Link to="/notifications"><Icon name="bell" /> Notifications</Link>
       <Link to="/market?mine=1"><Icon name="shop" /> Your listings</Link>
-      {ai && <Link to="/assistant"><Icon name="chat" /> Help &amp; support · Connectly Assistant</Link>}
+      {ai && <Link to="/assistant"><Icon name="chat" /> Help &amp; support · Connectly AI</Link>}
       <Link to="/settings"><Icon name="gear" /> Privacy and settings</Link>
       {me.roles?.includes('admin') && <Link to="/admin"><Icon name="shield" /> Admin</Link>}
     </div>
