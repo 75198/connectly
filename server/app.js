@@ -53,6 +53,10 @@ const ProfileSchema = z.object({
   work_company: txt(80).optional(), work_role: txt(80).optional(), education: txt(120).optional(),
   current_place_id: z.number().int().positive().nullable().optional(),
   hometown_place_id: z.number().int().positive().nullable().optional(),
+  category: txt(40).optional(),
+  website: z.union([z.literal(''), z.string().trim().max(200).regex(/^https?:\/\/[^\s<>"]+\.[^\s<>"]+$/i, 'Website must start with http:// or https://')]).optional(),
+  socials: z.object({ instagram: z.string().trim().max(40).regex(/^[\w.]*$/).optional(), x: z.string().trim().max(40).regex(/^\w*$/).optional(), tiktok: z.string().trim().max(40).regex(/^[\w.]*$/).optional(), youtube: z.string().trim().max(60).regex(/^@?[\w.-]*$/).optional(), linkedin: z.string().trim().max(80).regex(/^[\w-]*$/).optional() }).strict().optional(),
+  public_contact: txt(120).optional(), show_contact: z.boolean().optional(),
 }).strict(); // .strict(): unknown keys such as "role"/"is_admin" are rejected
 const Visibility = z.enum(['public', 'friends', 'private']);
 export const REACTIONS = ['like', 'love', 'haha', 'wow', 'sad', 'angry'];
@@ -100,7 +104,7 @@ const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_
   (SELECT count(*)::int FROM shares sh WHERE sh.post_id = p.id) AS share_count,
   EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me
   FROM posts p JOIN users u ON u.id = p.author_id AND (u.deactivated_at IS NULL OR u.id = $1)`;
-const publicUser = (u) => u && ({ id: u.id, username: u.username, full_name: u.full_name, bio: u.bio, location: u.location, hometown: u.hometown, interests: u.interests || [], relationship_status: u.relationship_status, work_company: u.work_company, work_role: u.work_role, education: u.education, avatar_path: u.avatar_path, cover_path: u.cover_path, verified: !!u.verified_at && config.features.verified });
+const publicUser = (u) => u && ({ id: u.id, username: u.username, full_name: u.full_name, bio: u.bio, location: u.location, hometown: u.hometown, interests: u.interests || [], relationship_status: u.relationship_status, work_company: u.work_company, work_role: u.work_role, education: u.education, category: u.category || '', website: u.website || '', socials: u.socials || {}, contact: u.show_contact ? u.public_contact || '' : '', avatar_path: u.avatar_path, cover_path: u.cover_path, verified: !!u.verified_at && config.features.verified });
 
 async function getOwnPost(userId, postId) {
   const { rows } = await q(`${POST_SELECT} WHERE p.id = $2 AND p.author_id = $1`, [userId, postId]);
@@ -348,7 +352,7 @@ export function createApp() {
 
   api.get('/me', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT * FROM users WHERE id = $1', [req.user.id]);
-    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility, theme_pref: rows[0].theme_pref, locale: rows[0].locale, text_scale: rows[0].text_scale ?? null, hide_like_counts: rows[0].hide_like_counts, two_step: !!rows[0].totp_enabled_at || rows[0].two_step_email,
+    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility, theme_pref: rows[0].theme_pref, public_contact: rows[0].public_contact || '', show_contact: !!rows[0].show_contact, locale: rows[0].locale, text_scale: rows[0].text_scale ?? null, hide_like_counts: rows[0].hide_like_counts, two_step: !!rows[0].totp_enabled_at || rows[0].two_step_email,
       acting_as: req.user.acting_space_id ? (await q('SELECT id, slug, name, photo_path FROM spaces WHERE id = $1', [req.user.acting_space_id])).rows[0] || null : null,
       unread_notifications: (await q('SELECT count(*) AS n FROM notifications WHERE user_id = $1 AND read_at IS NULL', [req.user.id])).rows[0].n, current_place_id: rows[0].current_place_id, hometown_place_id: rows[0].hometown_place_id, roles: req.user.roles });
   });
@@ -404,7 +408,7 @@ export function createApp() {
     const { rows: c } = await q(`SELECT count(*) AS n FROM posts p WHERE p.author_id = $2 AND p.as_space_id IS NULL AND ${VISIBLE}`, [me, u.id]);
     const pu = publicUser(u);
     const canDetails = u.id === me || u.profile_details_visibility === 'public' || (u.profile_details_visibility === 'friends' && (rel.friend_status === 'friends' || (rel.following && rel.follows_me)));
-    if (!canDetails) for (const k of ['bio', 'location', 'hometown', 'relationship_status', 'work_company', 'work_role', 'education']) pu[k] = ''; if (!canDetails) pu.interests = [];
+    if (!canDetails) { for (const k of ['bio', 'location', 'hometown', 'relationship_status', 'work_company', 'work_role', 'education', 'website', 'contact']) pu[k] = ''; pu.socials = {}; } if (!canDetails) pu.interests = [];
     const teenBlock = config.features.teenSafety && u.birth_date && new Date(u.birth_date) > new Date(Date.now() - 18 * 365.25 * 864e5) && !rel.follows_me && !(req.user.birth_date && new Date(req.user.birth_date) > new Date(Date.now() - 18 * 365.25 * 864e5));
     const can_message = config.features.messages && u.id !== me && !teenBlock && (u.dm_privacy === 'everyone' || (u.dm_privacy === 'following' && rel.follows_me));
     const locked = u.is_private && u.id !== me && !rel.following;
@@ -415,6 +419,12 @@ export function createApp() {
     const { rows } = await q('SELECT id FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL', [req.params.username]);
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });
     res.json(await pagePosts(req.user.id, 'p.author_id = $2 AND p.as_space_id IS NULL', [rows[0].id], req.query.cursor, req.query.limit));
+  });
+  // Profile "Mentions" tab: visible posts by others that @mention this user.
+  api.get('/users/:username/mentions', requireAuth, async (req, res) => {
+    const { rows } = await q('SELECT id, username FROM users WHERE lower(username) = lower($1) AND deactivated_at IS NULL', [req.params.username]);
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    res.json(await pagePosts(req.user.id, "p.author_id <> $2 AND p.body ~* $3", [rows[0].id, `(^|[^\\w])@${rows[0].username.replace(/[^\w.]/g, '')}([^\\w]|$)`], req.query.cursor, req.query.limit));
   });
 
   // ---------- posts ----------

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, toast, useFeatures, User } from '../api';
 import { useSession } from '../session';
@@ -19,11 +19,11 @@ function FriendButtons({ u, onChange }: { u: User; onChange: (p: Partial<User>) 
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [menu, setMenu] = useState(false); const nav = useNavigate();
   const call = async (path: string, method: string, patch?: (r: any) => Partial<User>) => { setBusy(true); setErr(''); try { const r = await api(path, { method }); if (patch) onChange(patch(r)); if (path.endsWith('/follow') && method === 'PUT') sfx('follow'); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const n = encodeURIComponent(u.username);
-  return <div className="stack pad">
-    <div className="row wrap">
-      <button className={`btn ${u.following ? 'ghost' : 'primary'} grow`} disabled={busy} aria-pressed={!!u.following} onClick={() => call(`/users/${n}/follow`, u.following || (u as any).requested ? 'DELETE' : 'PUT', (r) => ({ following: r.following, requested: !!r.requested, follower_count: r.follower_count ?? (u.follower_count || 0) + (r.following ? 1 : -1) } as any))}>{u.following ? '✓ Following' : (u as any).requested ? 'Requested' : u.follows_me ? 'Follow back' : 'Follow'}</button>
-      {(u as any).can_message && <button className="btn ghost grow" disabled={busy} onClick={async () => { setBusy(true); try { const r = await api<{ id: number }>('/conversations', { json: { usernames: [u.username] } }); nav(`/messages/${r.id}`); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } }}><Icon name="chat" /> Message</button>}
-      <button className="btn icon ghost" aria-label="More options" onClick={() => setMenu(true)}><Icon name="more" /></button>
+  return <div className="stack">
+    <div className="pf-actions">
+      <button className={`btn ${u.following ? 'pf-secondary' : 'pf-primary'}`} disabled={busy} aria-pressed={!!u.following} onClick={() => call(`/users/${n}/follow`, u.following || (u as any).requested ? 'DELETE' : 'PUT', (r) => ({ following: r.following, requested: !!r.requested, follower_count: r.follower_count ?? (u.follower_count || 0) + (r.following ? 1 : -1) } as any))}>{u.following ? '✓ Following' : (u as any).requested ? 'Requested' : u.follows_me ? 'Follow back' : 'Follow'}</button>
+      {(u as any).can_message && <button className="btn pf-secondary" disabled={busy} onClick={async () => { setBusy(true); try { const r = await api<{ id: number }>('/conversations', { json: { usernames: [u.username] } }); nav(`/messages/${r.id}`); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } }}><Icon name="chat" /> Message</button>}
+      <button className="btn icon pf-more" aria-label="More options" onClick={() => setMenu(true)}><Icon name="more" /></button>
     </div>
     {err && <p className="error">{err}</p>}
     {menu && <Sheet title={u.full_name} onClose={() => setMenu(false)}>
@@ -34,36 +34,49 @@ function FriendButtons({ u, onChange }: { u: User; onChange: (p: Partial<User>) 
 
 export function Profile() {
   const { username = '' } = useParams();
-  const [u, setU] = useState<User | null>(null); const [err, setErr] = useState(''); const [tab, setTab] = useState<'posts' | 'photos' | 'about'>('posts');
+  const [u, setU] = useState<User | null>(null); const [err, setErr] = useState(''); const [tab, setTab] = useState<'posts' | 'photos' | 'reels' | 'mentions'>('posts'); const [more, setMore] = useState(false); const nav = useNavigate();
+  const coverRef = useParallax();
   const feed = usePosts(`/users/${encodeURIComponent(username)}/posts`);
   const pinned = usePinned(username);
   useEffect(() => { setU(null); setErr(''); api<User>(`/users/${encodeURIComponent(username)}`).then(setU).catch((e) => setErr(e.message)); }, [username]);
   if (err) return <div className="card empty">{err}</div>;
   if (!u) return <div className="card profilehead skel" style={{ height: 360 }}><span className="sk block" /></div>;
   const work = [u.work_role, u.work_company].filter(Boolean).join(' at ');
-  const photos = feed.items.filter((p) => p.image_path || p.poster_path);
-  return <div className="stack">
-    <section className="card profilehead">
-      <div className="cover" style={u.cover_path ? { backgroundImage: `url(${u.cover_path})` } : undefined} />
-      <div className="pinfo">
-        <div className="pav"><Avatar user={u} size={112} /></div>
-        <h1>{u.full_name} <VerifiedBadge on={u.verified} size={22} /> <TierBadge tier={u.tier} /></h1><div className="meta">@{u.username}{u.location ? ` · 📍 ${u.location}` : ''}</div>
-        {u.bio && <p className="pbiotext">{u.bio}</p>}
-        <div className="pstats"><span><b>{u.post_count ?? 0}</b><small>Posts</small></span><Link to={(u as any).lists_hidden ? '#' : `/u/${u.username}/followers`}><b>{u.follower_count ?? 0}</b><small>Followers</small></Link><Link to={(u as any).lists_hidden ? '#' : `/u/${u.username}/following`}><b>{u.following_count ?? 0}</b><small>Following</small></Link></div>
-        {u.is_me ? <div className="row pactions"><Link className="btn primary grow" to="/settings/profile"><Icon name="gear" /> Edit profile</Link><Link className="btn ghost" to="/me/saved" aria-label="Saved"><Icon name="bookmark" /></Link></div>
-          : <div className="pactions"><FriendButtons u={u} onChange={(p) => setU({ ...u, ...p })} /></div>}
+  const photos = feed.items.filter((p) => p.image_path && p.kind !== 'reel'); const reels = feed.items.filter((p) => p.kind === 'reel');
+  const shareProfile = async () => { const url = `${location.origin}/u/${u.username}`; try { if (navigator.share) await navigator.share({ title: u.full_name, url }); else { await navigator.clipboard.writeText(url); toast('Profile link copied'); } } catch { /* cancelled */ } };
+  return <div className="stack pf">
+    <section className="pf-hero">
+      <div className="pf-cover" ref={coverRef} style={u.cover_path ? { backgroundImage: `url(${u.cover_path})` } : undefined} />
+      <div className="pf-topbar">
+        <button className="pf-glass" aria-label="Back" onClick={() => (history.length > 1 ? nav(-1) : nav('/'))}><Icon name="back" /></button>
+        <span className="row" style={{ gap: 8 }}><Link className="pf-glass" to={`/search?q=${encodeURIComponent('@' + u.username)}`} aria-label="Search"><Icon name="search" /></Link>
+          <button className="pf-glass" aria-label="More options" onClick={() => setMore(true)}><Icon name="more" /></button></span>
       </div>
-      <nav className="ptabs">{(['posts', 'photos', 'about'] as const).map((t) => <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}</nav>
     </section>
-    {tab === 'about' && <section className="card pbio details">
-        {work && <p>💼 {work}</p>}
-        {u.education && <p>🎓 {u.education}</p>}
-        {u.location && <p>📍 Lives in {u.location}</p>}
-        {u.hometown && <p>🏠 From {u.hometown}</p>}
-        {u.relationship_status && <p>❤️ {u.relationship_status}</p>}
-        {!!u.interests?.length && <div className="tags">{u.interests.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
-        {!work && !u.education && !u.location && !u.hometown && !u.relationship_status && !u.interests?.length && <p className="meta">No details shared yet.</p>}
-    </section>}
+    <section className="pf-sheet">
+      <div className="pf-avatar"><span className="pf-ring"><Avatar user={u} size={120} /></span></div>
+      <h1 className="pf-name">{u.full_name} <VerifiedBadge on={u.verified} size={22} /> <TierBadge tier={u.tier} /></h1>
+      <div className="pf-handle">@{u.username}{u.category ? <> · <span className="pf-cat">{u.category}</span></> : null}</div>
+      <div className="pf-stats">
+        <Link to={(u as any).lists_hidden ? '#' : `/u/${u.username}/followers`}><b>{compact(u.follower_count)}</b><small>followers</small></Link><i />
+        <Link to={(u as any).lists_hidden ? '#' : `/u/${u.username}/following`}><b>{compact(u.following_count)}</b><small>following</small></Link><i />
+        <span><b>{compact(u.post_count)}</b><small>posts</small></span>
+      </div>
+      {u.bio && <Bio text={u.bio} />}
+      {u.is_me ? <div className="pf-actions"><Link className="btn pf-primary" to="/settings/profile"><Icon name="gear" /> Edit profile</Link><button className="btn pf-secondary" onClick={shareProfile}><Icon name="share" /> Share</button></div>
+        : <FriendButtons u={u} onChange={(p) => setU({ ...u, ...p })} />}
+    </section>
+    <nav className="pf-tabs" role="tablist">{(['posts', 'photos', 'reels', 'mentions'] as const).map((t) => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t === 'posts' ? 'All' : t[0].toUpperCase() + t.slice(1)}</button>)}</nav>
+    {tab === 'posts' && <Glance u={u} work={work} />}
+    {more && <Sheet title={u.full_name} onClose={() => setMore(false)}><div className="list">
+      <button onClick={() => { setMore(false); shareProfile(); }}><Icon name="share" /> Share profile</button>
+      <button onClick={async () => { setMore(false); await navigator.clipboard?.writeText(`${location.origin}/u/${u.username}`); toast('Profile link copied'); }}><Icon name="globe" /> Copy profile link</button>
+      {u.is_me && <Link to="/me/saved" onClick={() => setMore(false)}><Icon name="bookmark" /> Saved</Link>}
+      {u.is_me && <Link to="/settings" onClick={() => setMore(false)}><Icon name="gear" /> Settings and privacy</Link>}
+      {!u.is_me && <RestrictMute username={encodeURIComponent(u.username)} name={u.full_name.split(' ')[0]} />}
+    </div></Sheet>}
+    {tab === 'reels' && (reels.length ? <div className="photogrid reelgrid">{reels.map((p) => <Link key={p.id} to={`/reels/${p.id}`}><img src={p.poster_path || ''} alt="" loading="lazy" /><i>▶</i></Link>)}</div> : <p className="card empty">{u.is_me ? 'Your reels will show here.' : 'No reels yet.'}</p>)}
+    {tab === 'mentions' && <Mentions username={u.username} />}
     {tab === 'photos' && (photos.length ? <div className="photogrid">{photos.map((p) => <Link key={p.id} to={p.kind === 'reel' ? `/reels/${p.id}` : `/post/${p.id}`}><img src={(p.kind === 'reel' ? p.poster_path : p.image_path)!} alt="" loading="lazy" />{p.kind === 'reel' && <i>▶</i>}</Link>)}</div> : <p className="card empty">No photos yet.</p>)}
     {(u as any).locked && <section className="card lockcard"><div className="lockicon">🔒</div><b>This account is private</b><p className="meta">Follow this account to see their photos and videos.</p></section>}
     {tab === 'posts' && !(u as any).locked && <>
@@ -73,20 +86,54 @@ export function Profile() {
   </div>;
 }
 
+export const compact = (n?: number | string | null) => { const v = Number(n) || 0; try { return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(v); } catch { return String(v); } };
+function useParallax() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { let raf = 0; const on = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { const y = Math.min(window.scrollY, 400); if (ref.current) ref.current.style.transform = `translate3d(0, ${y * 0.4}px, 0) scale(${1 + y / 1600})`; }); };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return; window.addEventListener('scroll', on, { passive: true }); return () => { window.removeEventListener('scroll', on); cancelAnimationFrame(raf); }; }, []);
+  return ref;
+}
+function Bio({ text }: { text: string }) {
+  const [open, setOpen] = useState(false); const long = text.length > 140 || text.split('\n').length > 3;
+  return <p className={`pf-bio ${open || !long ? 'open' : ''}`}>{text}{long && !open && <button className="linkbtn" onClick={() => setOpen(true)}> See more</button>}</p>;
+}
+const SOCIAL: Record<string, [string, (h: string) => string]> = { instagram: ['Instagram', (h) => `https://instagram.com/${h}`], x: ['X', (h) => `https://x.com/${h}`], tiktok: ['TikTok', (h) => `https://www.tiktok.com/@${h}`], youtube: ['YouTube', (h) => `https://youtube.com/${h.startsWith('@') ? h : '@' + h}`], linkedin: ['LinkedIn', (h) => `https://www.linkedin.com/in/${h}`] };
+function Glance({ u, work }: { u: User; work: string }) {
+  const socials = Object.entries(u.socials || {}).filter(([k, v]) => v && SOCIAL[k]);
+  const rows: [string, React.ReactNode][] = [];
+  if (work) rows.push(['💼', work]);
+  if (u.education) rows.push(['🎓', u.education]);
+  if (u.location) rows.push(['📍', <>Lives in <b>{u.location}</b></>]);
+  if (u.hometown) rows.push(['🏠', <>From <b>{u.hometown}</b></>]);
+  if (u.relationship_status) rows.push(['❤️', u.relationship_status]);
+  if (u.website) rows.push(['🔗', <a href={u.website} target="_blank" rel="noopener noreferrer nofollow">{u.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</a>]);
+  if (socials.length) rows.push(['🌐', <span className="pf-socials">{socials.map(([k, h]) => <a key={k} href={SOCIAL[k][1](h!)} target="_blank" rel="noopener noreferrer nofollow">{SOCIAL[k][0]}</a>)}</span>]);
+  if (u.contact) rows.push(['✉️', /@/.test(u.contact) ? <a href={`mailto:${u.contact}`}>{u.contact}</a> : /^[+\d][\d\s-]{5,}$/.test(u.contact) ? <a href={`tel:${u.contact.replace(/\s/g, '')}`}>{u.contact}</a> : u.contact]);
+  if (u.is_me) rows.push(['🔴', <Link to="/live/new">Go live for your community</Link>]);
+  if (!rows.length) return null;
+  return <section className="card pf-glance"><h3>At a glance</h3>{rows.map(([i, c], n) => <div key={n} className="pf-grow"><span className="pf-gi">{i}</span><span className="grow">{c}</span></div>)}
+    {u.is_me && <Link className="linkbtn" to="/settings/profile">Edit details</Link>}</section>;
+}
+function Mentions({ username }: { username: string }) {
+  const feed = usePosts(`/users/${encodeURIComponent(username)}/mentions`);
+  return <PostList feed={feed} empty={`Posts that mention @${username} will show here.`} />;
+}
+
 function TagInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const [t, setT] = useState('');
   const add = () => { const v = t.trim().replace(/,$/, ''); if (v && !value.includes(v) && value.length < 15) onChange([...value, v.slice(0, 30)]); setT(''); };
   return <label>Interests
     <div className="tags editable">{value.map((x) => <span key={x} className="tag">{x}<button type="button" aria-label={`Remove ${x}`} onClick={() => onChange(value.filter((y) => y !== x))}>×</button></span>)}
       <input value={t} onChange={(e) => (e.target.value.endsWith(',') ? (setT(e.target.value.slice(0, -1)), setTimeout(add)) : setT(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} onBlur={add} maxLength={30} aria-label="Add an interest" />
-    </div><span className="hint">Press Enter after each one (up to 15).</span>
+    </div><span className="hint">Press Enter after each one.</span>
   </label>;
 }
 
 export function EditProfile() {
   const { me, refresh } = useSession(); const nav = useNavigate();
   const [d, setD] = useState({ full_name: me?.full_name || '', username: me?.username || '', bio: me?.bio || '', interests: me?.interests || [], relationship_status: me?.relationship_status || '',
-    work_company: me?.work_company || '', work_role: me?.work_role || '', education: me?.education || '' });
+    work_company: me?.work_company || '', work_role: me?.work_role || '', education: me?.education || '',
+    category: me?.category || '', website: me?.website || '', socials: { instagram: '', x: '', tiktok: '', youtube: '', linkedin: '', ...(me?.socials || {}) }, public_contact: me?.public_contact || '', show_contact: !!me?.show_contact });
   const [place, setPlace] = useState<{ current?: number | null; hometown?: number | null }>({});
   const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState('');
   if (!me) return null;
@@ -122,7 +169,13 @@ export function EditProfile() {
     <form className="card stack" onSubmit={save}>
       <label>Full name<input value={d.full_name} onChange={set('full_name')} maxLength={80} required autoComplete="name" /></label>
       <label>Username<input value={d.username} onChange={(e) => setD({ ...d, username: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} minLength={3} maxLength={20} required autoCapitalize="none" /><span className="hint">Your profile link: /u/{d.username || 'username'}</span></label>
-      <label>Bio<textarea value={d.bio} onChange={set('bio')} maxLength={300} rows={3} /><small className="meta">{d.bio.length}/300</small></label>
+      <label>Bio<textarea value={d.bio} onChange={set('bio')} maxLength={300} rows={3} /></label>
+      <label>Category<input value={d.category} onChange={set('category')} maxLength={40} list="pf-cats" /><span className="hint">Shown under your name, like Digital creator or Photographer.</span></label>
+      <datalist id="pf-cats">{['Digital creator', 'Photographer', 'Artist', 'Musician', 'Writer', 'Entrepreneur', 'Student', 'Public figure', 'Local business', 'Community'].map((c) => <option key={c} value={c} />)}</datalist>
+      <label>Website<input value={d.website} onChange={set('website')} maxLength={200} inputMode="url" autoCapitalize="none" placeholder="https://" /></label>
+      <fieldset className="stack pf-socialedit"><legend>Linked accounts</legend>{(['instagram', 'x', 'tiktok', 'youtube', 'linkedin'] as const).map((k) => <label key={k}>{({ instagram: 'Instagram', x: 'X', tiktok: 'TikTok', youtube: 'YouTube', linkedin: 'LinkedIn' })[k]} username<input value={d.socials[k] || ''} onChange={(e) => setD({ ...d, socials: { ...d.socials, [k]: e.target.value.replace(/^@/, k === 'youtube' ? '@' : '').replace(/[^\w.@-]/g, '') } })} maxLength={60} autoCapitalize="none" /></label>)}</fieldset>
+      <label>Public contact<input value={d.public_contact} onChange={set('public_contact')} maxLength={120} autoCapitalize="none" /><span className="hint">An email or phone number for business enquiries.</span></label>
+      <label className="row between"><span>Show contact on my profile</span><input type="checkbox" checked={d.show_contact} onChange={(e) => setD({ ...d, show_contact: e.target.checked })} /></label>
       <TagInput value={d.interests} onChange={(interests) => setD({ ...d, interests })} />
       <label>Relationship status<select value={d.relationship_status} onChange={set('relationship_status')}>{RELATIONSHIP.map((r) => <option key={r} value={r}>{r || 'Not shown'}</option>)}</select></label>
       <div className="grid2"><label>Company<input value={d.work_company} onChange={set('work_company')} maxLength={80} autoComplete="organization" /></label>

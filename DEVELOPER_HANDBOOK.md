@@ -194,3 +194,15 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - Rates: open.er-api.com (free, no key), cached daily in `server/data/rates.json`. Converted prices are rounded to friendly points (4.99, 1,500, 15,000) and marked "≈"; formatting uses `Intl.NumberFormat`.
 - Marketplace keeps the seller's price and currency and adds an approximate conversion.
 - **Store apps:** in the App Store and Google Play builds, Apple and Google set and charge local prices; these server prices are for the web only.
+
+## 23. Save to gallery (migration 019, `FEATURE_DOWNLOADS`)
+- ⋯ › Save to gallery on posts, a Save button in the photo viewer and on Reels. The server makes an HD copy with a small Connectly mark and @creator (sharp for photos, ffmpeg for video). On iPhone the share sheet opens (Save Image / Save Video); elsewhere the file downloads.
+- Never for private accounts, friends-only, close-friends or only-me posts, or music that isn't openly licensed. Owners can turn downloads off per post (⋯ menu) or for their whole account (Privacy › Downloads; on by default).
+
+## 24. Profile redesign (migration 020)
+- Full-bleed cover with parallax, glass top bar (back, search, ⋯), gradient-ring avatar, a rounded sheet, name with verified badge and category, compact stats, bio with See more, and big Follow/Message (or Edit/Share) buttons. Sticky pill tabs (All, Photos, Reels, Mentions) and an At a glance card.
+- New optional fields: `category`, `website`, `socials` (Instagram, X, TikTok, YouTube, LinkedIn usernames), and `public_contact`, shown only if `show_contact` is on. All are empty or hidden by default. Details visibility rules still apply.
+
+## 25. Quality checks
+- `npm run test:e2e` (set `E2E_BASE` to a local server seeded with `SEED_DEMO=1`) visits every route at 320, 375, 390 and 430 px. It fails if anything scrolls sideways, a card renders blank, the page is blank, or there are console or page errors. Never run it against production.
+- Live AI speed (Oct 2026, server to Groq, short prompt): time to first token is about 270 ms on `openai/gpt-oss-20b` (the current chat model) and about 390 ms on `gpt-oss-120b`. Groq doesn't list the Llama chat models right now.

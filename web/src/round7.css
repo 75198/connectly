@@ -211,3 +211,62 @@ button:active, .btn:active, .navbtn:active { transform: scale(.97); transition: 
 .mediaviewer{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.94);display:grid;place-items:center;animation:pagein .15s}
 .mediaviewer img{max-width:100vw;max-height:100dvh;object-fit:contain;aspect-ratio:auto}
 .mvbar{position:absolute;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;display:flex;justify-content:space-between}
+
+/* ===== Profile redesign (Connectly look) ===== */
+:root { --brandgrad: linear-gradient(135deg, #0F766E 0%, #14B8A6 45%, #6366F1 100%); --glass: color-mix(in srgb, var(--surface) 62%, transparent); --depth: 0 1px 2px rgba(15,23,42,.06), 0 8px 28px rgba(15,23,42,.08); }
+[data-theme=dark] { --depth: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); }
+.pf { gap: 0; }
+.pf-hero { position: relative; margin: -10px -8px 0; height: calc(210px + env(safe-area-inset-top)); overflow: hidden; border-radius: 0; }
+.pf-cover { position: absolute; inset: -20px 0 0; background: var(--brandgrad) center / cover no-repeat; will-change: transform; transform-origin: center top; }
+.pf-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.35) 0%, transparent 35%, transparent 70%, rgba(0,0,0,.15)); }
+.pf-topbar { position: absolute; z-index: 2; top: calc(10px + env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; justify-content: space-between; }
+.pf-glass { width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); display: inline-grid; place-items: center; color: #fff; background: rgba(15,23,42,.28); -webkit-backdrop-filter: blur(14px) saturate(160%); backdrop-filter: blur(14px) saturate(160%); cursor: pointer; }
+.pf-glass svg { width: 20px; height: 20px; }
+.pf-sheet { position: relative; z-index: 1; margin: -34px -8px 0; padding: 0 18px 18px; background: var(--surface); border-radius: 28px 28px 0 0; box-shadow: 0 -10px 30px rgba(15,23,42,.08); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; animation: pfsheet .35s cubic-bezier(.2,.8,.2,1); }
+@keyframes pfsheet { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+.pf-avatar { margin-top: -66px; }
+.pf-ring { display: inline-block; padding: 4px; border-radius: 50%; background: var(--brandgrad); box-shadow: var(--depth); }
+.pf-ring .avatar { display: block; border: 4px solid var(--surface); border-radius: 50%; width: 120px; height: 120px; object-fit: cover; font-size: 2.4rem; }
+.pf-name { margin: 6px 0 0; font-size: 1.55rem; font-weight: 850; letter-spacing: -.02em; line-height: 1.15; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; overflow-wrap: anywhere; }
+.pf-handle { color: var(--muted); font-size: .95rem; }
+.pf-cat { color: var(--text); font-weight: 600; }
+.pf-stats { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 6px 0 2px; }
+.pf-stats > a, .pf-stats > span { display: flex; flex-direction: column; align-items: center; color: var(--text); min-width: 64px; }
+.pf-stats b { font-size: 1.2rem; font-weight: 850; }
+.pf-stats small { color: var(--muted); font-size: .82rem; }
+.pf-stats i { width: 1px; height: 26px; background: var(--border); }
+.pf-bio { margin: 4px 0 0; max-width: 34em; white-space: pre-line; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; text-align: center; }
+.pf-bio.open { display: block; -webkit-line-clamp: unset; }
+.linkbtn { border: 0; background: none; color: var(--primary); font: inherit; font-weight: 700; cursor: pointer; padding: 0; }
+.pf-actions { display: flex; gap: 10px; width: 100%; margin-top: 8px; }
+.pf-actions .btn { flex: 1; min-height: 48px; border-radius: 16px; font-weight: 800; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.pf-actions .pf-more { flex: 0 0 48px; width: 48px; border-radius: 16px; background: var(--hover); border: 0; }
+.pf-primary { background: var(--brandgrad); color: #fff; border: 0; box-shadow: 0 6px 18px rgba(20,184,166,.32); }
+.pf-primary:hover { text-decoration: none; filter: brightness(1.05); }
+.pf-secondary { background: var(--hover); color: var(--text); border: 1px solid var(--border); }
+.pf-tabs { position: sticky; top: 0; z-index: 4; display: flex; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 12px 10px; margin: 0 -8px 12px; background: var(--glass); -webkit-backdrop-filter: blur(16px) saturate(170%); backdrop-filter: blur(16px) saturate(170%); border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); overflow-x: auto; scrollbar-width: none; }
+.pf-tabs button { flex: 1 0 auto; min-height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-weight: 700; cursor: pointer; }
+.pf-tabs button.on { background: var(--text); color: var(--surface); border-color: transparent; }
+.pf .stack, .pf > .card, .pf > .postcard { margin-bottom: 12px; }
+.pf-glance { display: flex; flex-direction: column; gap: 12px; }
+.pf-glance h3 { margin: 0; }
+.pf-grow { display: flex; gap: 12px; align-items: center; min-width: 0; overflow-wrap: anywhere; }
+.pf-gi { width: 36px; height: 36px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--hover); }
+.pf-socials { display: flex; flex-wrap: wrap; gap: 8px; }
+.pf-socials a { padding: 4px 10px; border-radius: 999px; background: var(--hover); font-weight: 600; font-size: .9rem; }
+.reelgrid img { aspect-ratio: 9 / 16; }
+@media (min-width: 700px) { .pf-hero { margin: -24px -24px 0; height: 280px; border-radius: 0 0 24px 24px; } .pf-sheet { margin: -40px 0 0; border-radius: 28px; } .pf-tabs { margin: 0 0 12px; border-radius: 16px; top: 8px; } }
+
+/* ===== Consistent modern polish: Home, Search, Marketplace, Messages ===== */
+.card { border-radius: 20px; box-shadow: var(--depth); border-color: color-mix(in srgb, var(--border) 70%, transparent); }
+.postcard, .newscard, .filmcard, .reelsbanner, .composer, .mcard, .convrow { border-radius: 20px; }
+.reelsbanner .reelsbadge, .storyring, .pf-ring { background: var(--brandgrad); }
+.feedtabs button.on, .segmented .on { background: var(--brandgrad); color: #fff; }
+.btn.primary { background: var(--brandgrad); border: 0; }
+.searchbar input, input[type=search] { border-radius: 16px; }
+.mgrid > a, .marketgrid > a { border-radius: 18px; overflow: hidden; box-shadow: var(--depth); background: var(--surface); }
+.convlist > a, .convlist .row { border-radius: 16px; }
+.bottomnav { -webkit-backdrop-filter: blur(18px) saturate(170%); backdrop-filter: blur(18px) saturate(170%); background: var(--glass); }
+.pf-sheet > .stack { width: 100%; }
+.pf-ring span.avatar { display: grid; place-items: center; background: var(--surface); color: var(--primary); font-weight: 850; }
+.pf-actions .btn { white-space: nowrap; }
