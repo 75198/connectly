@@ -12,10 +12,10 @@ type Props = { onDone: (r: StudioResult) => void; onClose: () => void; allowVide
 
 type Adj = { b: number; c: number; s: number; w: number; sharp: number; fade: number };
 const ZERO: Adj = { b: 0, c: 0, s: 0, w: 0, sharp: 0, fade: 0 };
-const FILTERS: [string, Partial<Adj>][] = [['Original', {}], ['Vivid', { c: 15, s: 30 }], ['Warm', { w: 35, s: 10 }], ['Cool', { w: -35 }], ['Lagos', { b: 8, c: 10, s: 20, w: 20 }],
+const FILTERS: [string, Partial<Adj>][] = [['Original', {}], ['Vivid', { c: 15, s: 30 }], ['Warm', { w: 35, s: 10 }], ['Cool', { w: -35 }], ['Golden', { b: 8, c: 10, s: 20, w: 20 }],
   ['Fade', { fade: 30, c: -10 }], ['Mono', { s: -100, c: 15 }], ['Noir', { s: -100, c: 40, b: -8 }], ['Golden', { w: 50, b: 6, s: 15 }], ['Crisp', { c: 20, sharp: 60 }]];
 const ADJ: [keyof Adj, string, number, number][] = [['b', 'Brightness', -50, 50], ['c', 'Contrast', -50, 50], ['s', 'Saturation', -100, 100], ['w', 'Warmth', -60, 60], ['sharp', 'Sharpen', 0, 100], ['fade', 'Fade', 0, 60]];
-const STICKERS = ['😍', '😂', '🔥', '🎉', '❤️', '✨', '👍', '🙏', '😎', '🥳', '🌍', '🇳🇬', '💯', '🌸', '⚽', '🎶'];
+const STICKERS = ['😍', '😂', '🔥', '🎉', '❤️', '✨', '👍', '🙏', '😎', '🥳', '🌍', '💯', '🌸', '⚽', '🎶'];
 const COLORS = ['#ffffff', '#000000', '#F43F5E', '#F59E0B', '#10B981', '#0EA5E9', '#8B5CF6', '#14B8A6'];
 const RATIOS: [string, number | null][] = [['Original', null], ['1:1', 1], ['4:5', 0.8], ['9:16', 9 / 16], ['16:9', 16 / 9]];
 type Item = { id: number; kind: 'text' | 'sticker'; text: string; x: number; y: number; size: number; color: string };

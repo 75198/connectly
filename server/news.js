@@ -82,7 +82,7 @@ async function signals(uid) {
 }
 const region = (s) => (/nigeria|lagos|abuja|ibadan|kano|port harcourt|enugu|\bng\b/i.test(s.location || '') || ['yo', 'ha', 'ig'].includes(s.locale) ? 'NG' : /ghana|accra/i.test(s.location || '') ? 'GH' : /kenya|nairobi/i.test(s.location || '') ? 'KE' : /south africa|johannesburg|cape town/i.test(s.location || '') ? 'ZA' : null);
 export async function newsFor(uid, { limit = 12, topic, country } = {}) {
-  const s = await signals(uid); const reg = region(s) || (['NG', 'GH', 'KE', 'ZA'].includes(country) ? country : null); // country: light hint from private detection
+  const s = await signals(uid); const reg = region(s) || country || null; // country: light hint from private detection
   const keys = [...GLOBAL, ...Object.keys(FEEDS).filter((k) => (FEEDS[k].lang && FEEDS[k].lang === s.locale) || (reg && FEEDS[k].region?.includes(reg)))];
   const all = (await Promise.all(keys.map(loadFeed))).flat();
   const words = [...(Array.isArray(s.interests) ? s.interests : []), ...(s.searches || []), ...(s.liked_tags || []), ...(s.follow_tags || [])].map((w) => String(w).toLowerCase()).filter((w) => w.length > 2).slice(0, 80);
@@ -92,7 +92,7 @@ export async function newsFor(uid, { limit = 12, topic, country } = {}) {
   const scored = all.filter((i) => fresh(i) && (!topic || i.topic === topic) && !seen.has(i.title) && seen.add(i.title)).map((i) => {
     const t = (i.title + ' ' + i.summary).toLowerCase(); const ageH = Math.max(0, (now - Date.parse(i.published_at)) / 36e5);
     let score = 10 / (ageH + 2) + (i.image ? 0.6 : 0);
-    if (topics.has(i.topic)) score += 1.2; if (i.topic === 'local' || i.topic === 'africa') score += reg || s.locale !== 'en' ? 1.5 : 0;
+    if (topics.has(i.topic)) score += 1.2; if (i.topic === 'local' || i.topic === 'africa') score += reg || (i.lang && i.lang === s.locale) ? 0.8 : 0; // light localisation only
     for (const w of words) if (t.includes(w)) score += 0.8;
     return { ...i, score };
   }).sort((a, b) => b.score - a.score);

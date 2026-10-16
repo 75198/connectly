@@ -1,9 +1,10 @@
 import { startPricing } from './pricing.js';
+import { purgeScheduledDeletions } from './app.js';
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { startPurgeJob } from './postextras.js';
 createApp().listen(config.port, '0.0.0.0', () => console.log(`Connectly listening on :${config.port}`));
-startPurgeJob(); // hourly: purge posts deleted > 30 days ago and expired stories
+startPurgeJob(); setInterval(() => purgeScheduledDeletions().catch(() => {}), 3600e3).unref(); // hourly: purge posts deleted > 30 days ago and expired stories
 import { sendEventReminders } from './round7.js';
 import { notify } from './social.js';
 import { syncMusic } from './music/index.js';

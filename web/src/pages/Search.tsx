@@ -60,7 +60,7 @@ const RKEY = 'cx-recent-search';
 const getRecent = (): string[] => { try { return JSON.parse(localStorage.getItem(RKEY) || '[]'); } catch { return []; } };
 function saveRecent(q: string) { const r = [q, ...getRecent().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 8); localStorage.setItem(RKEY, JSON.stringify(r)); }
 const CATS: [string, string, string, string][] = [['people', 'People', '👥', '#0F766E'], ['posts', 'Posts', '📝', '#0EA5E9'], ['pages', 'Pages', '⭐', '#F59E0B'], ['groups', 'Groups', '🫂', '#10B981'], ['communities', 'Communities', '🌍', '#8B5CF6']];
-const IDEAS = ['Lagos', 'Football', 'Afrobeats', 'Recipes', 'Tech jobs', 'Fashion'];
+const IDEAS = ['Travel', 'Football', 'Music', 'Recipes', 'Tech jobs', 'Fashion'];
 function Discover({ onPick }: { onPick: (q: string, type?: string) => void }) {
   const [recent, setRecent] = useState(getRecent); const [ai, setAi] = useState(false);
   useEffect(() => { getFeatures().then((f) => setAi(!!f.ai_support)); }, []); const [people, setPeople] = useState<Person[] | null>(null);

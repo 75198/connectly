@@ -1,4 +1,7 @@
 // Round 7/8 post extras: verified badge, clickable hashtags, polls, translate, music chip, remix (duet) view, insights.
+import { linkRisk, URL_RE, type Risk } from '../lib/scam';
+import { useFeatures } from '../api';
+import { useSession } from '../session';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, credit, getFeatures, Post, toast, Track } from '../api';
@@ -14,25 +17,44 @@ export function VerifiedBadge({ on, size = 16 }: { on?: boolean; size?: number }
 }
 
 // Turns #hashtags into links (when the flag is on) and keeps everything else as text.
-export function RichText({ text, tags = true }: { text: string; tags?: boolean }) {
-  const [on, setOn] = useState(false); useEffect(() => { getFeatures().then((x) => setOn(!!x.hashtags)); }, []);
-  if (!on || !tags) return <>{text}</>;
+function Tags({ text, on }: { text: string; on: boolean }) {
+  if (!on) return <>{text}</>;
   const parts = text.split(/((?:^|[^\p{L}\p{N}_&/])#[\p{L}\p{N}_]{1,50})/u);
   return <>{parts.map((p, i) => { const m = p.match(/^(.?)#([\p{L}\p{N}_]{1,50})$/u); if (!m || /^\d+$/.test(m[2])) return <Fragment key={i}>{p}</Fragment>;
     return <Fragment key={i}>{m[1]}<Link className="hashtag" to={`/tag/${encodeURIComponent(m[2].toLowerCase())}`} onClick={(e) => e.stopPropagation()}>#{m[2]}</Link></Fragment>; })}</>;
 }
+// Links open through a scam check: risky ones show a warning first.
+export function SafeLink({ href }: { href: string }) {
+  const [warn, setWarn] = useState<Risk | null>(null); const f = useFeatures();
+  const url = /^https?:/i.test(href) ? href : `https://${href}`;
+  const open = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); const r = linkRisk(href); if (f?.anti_scam && r.level !== 'ok') setWarn(r); else window.open(url, '_blank', 'noopener,noreferrer'); };
+  return <><a href={url} className="extlink" target="_blank" rel="noopener noreferrer nofollow ugc" onClick={open}>{href.replace(/^https?:\/\//, '').slice(0, 60)}{href.length > 68 ? '…' : ''}</a>
+    {warn && <Sheet title={warn.level === 'block' ? 'Dangerous link blocked' : 'Be careful with this link'} onClose={() => setWarn(null)}>
+      <p className="scamwarn">⚠️ {warn.why}</p><p className="meta">Never enter passwords, codes or bank details on a site you reached from a message. Connectly will never ask for your login code.</p>
+      <code className="linkpreview">{url.slice(0, 200)}</code>
+      <button className="btn primary block" onClick={() => setWarn(null)}>Go back (safer)</button>
+      {warn.level !== 'block' && <button className="btn ghost block" onClick={() => { setWarn(null); window.open(url, '_blank', 'noopener,noreferrer'); }}>Open anyway</button>}
+    </Sheet>}</>;
+}
+export function RichText({ text, tags = true }: { text: string; tags?: boolean }) {
+  const [on, setOn] = useState(false); useEffect(() => { getFeatures().then((x) => setOn(!!x.hashtags)); }, []);
+  const parts = text.split(URL_RE);
+  return <>{parts.map((p, i) => (i % 2 === 1 ? <SafeLink key={i} href={p} /> : <Tags key={i} text={p} on={on && tags} />))}</>;
+}
 
 export function TranslateButton({ text, onText }: { text: string; onText: (t: string | null) => void }) {
-  const { lang, t } = useI18n(); const [on, setOn] = useState(false); const [state, setState] = useState<'idle' | 'busy' | 'shown'>('idle');
-  useEffect(() => { getFeatures().then((x) => setOn(!!x.translate)); }, []);
-  if (!on || !text.trim() || text.trim().length < 2) return null;
-  const go = async () => {
-    if (state === 'shown') { onText(null); setState('idle'); return; }
+  const { lang, t } = useI18n(); const f = useFeatures(); const { me } = useSession(); const [state, setState] = useState<'idle' | 'busy' | 'shown' | 'same'>('idle');
+  const on = !!f?.translate; const auto = on && !!f?.auto_translate && !!(me as any)?.auto_translate; const ok = !!text.trim() && text.trim().length >= 2 && /\p{L}/u.test(text);
+  const run = async (silent: boolean) => {
     setState('busy');
-    try { const r = await api<{ text: string }>('/translate', { json: { text: text.slice(0, 4000), target: lang } }); onText(r.text); setState('shown'); }
-    catch (e: any) { toast(e.message, 'err'); setState('idle'); }
+    try { const r = await api<{ text: string; same?: boolean }>('/translate', { json: { text: text.slice(0, 4000), target: lang } });
+      if (r.same) { setState('same'); if (!silent) toast('This is already in your language.'); return; } onText(r.text); setState('shown'); }
+    catch (e: any) { if (!silent) toast(e.message, 'err'); setState('idle'); }
   };
-  return <button type="button" className="linkish translatebtn" onClick={go} disabled={state === 'busy'}>{state === 'busy' ? '…' : state === 'shown' ? t('seeOriginal') : t('translate')}</button>;
+  useEffect(() => { if (auto && ok) run(true); /* eslint-disable-next-line */ }, [auto, ok, text, lang]);
+  if (!on || !ok || state === 'same') return null;
+  const go = () => { if (state === 'shown') { onText(null); setState('idle'); } else run(false); };
+  return <button type="button" className="linkish translatebtn" onClick={go} disabled={state === 'busy'}>{state === 'busy' ? (auto ? t('translate') + '…' : '…') : state === 'shown' ? t('seeOriginal') : t('translate')}</button>;
 }
 
 export function PollView({ post, onChange }: { post: Post; onChange: (p: Post) => void }) {

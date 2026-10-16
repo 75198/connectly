@@ -51,9 +51,13 @@ export function Market() {
   </div>;
 }
 
+function MarketSafety() {
+  return <div className="card marketsafety"><b>🛡️ Stay safe when buying</b><ul className="meta"><li><b>Never pay outside the app</b> or send a deposit before you see the item.</li><li>Meet in a busy public place and check the item first.</li><li>Never share codes, passwords or bank logins. Connectly will never ask for them.</li><li>Prices far below normal are a common scam. Report anything suspicious.</li></ul></div>;
+}
 export function NewListing() {
   const meta = useMeta(); const nav = useNavigate();
-  const [d, setD] = useState({ title: '', price: '', currency: 'NGN', category: '', description: '' }); const [placeId, setPlaceId] = useState<number | null>(null);
+  const [d, setD] = useState({ title: '', price: '', currency: 'USD', category: '', description: '' });
+  const reg = useRegion(); useEffect(() => { if (reg?.currency) setD((x) => (x.price ? x : { ...x, currency: reg.currency })); }, [reg?.currency]); const [placeId, setPlaceId] = useState<number | null>(null);
   const [files, setFiles] = useState<File[]>([]); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof d) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setD({ ...d, [k]: e.target.value });
   const addFiles = (fl: FileList | null) => { if (!fl) return; const ok = [...fl].filter((f) => f.type.startsWith('image/') && f.size <= 15 * 1024 * 1024); if (ok.length < fl.length) setErr('Some files were skipped (images up to 15 MB only).'); setFiles((x) => [...x, ...ok].slice(0, 6)); };
@@ -91,7 +95,7 @@ export function ListingView() {
       <div className="lphoto">{l.photos[i] && <img src={l.photos[i]} alt="" />}{l.status === 'sold' && <span className="soldtag">Sold</span>}</div>
       {l.photos.length > 1 && <div className="thumbs">{l.photos.map((p, j) => <button key={p} className={`thumb ${j === i ? 'sel' : ''}`} onClick={() => setI(j)} aria-label={`Photo ${j + 1}`}><img src={p} alt="" /></button>)}</div>}
       <div className="stack pad">
-        <h1>{l.title}</h1><b className="price">{money(l.price, l.currency)}</b>{approx(l.price, l.currency, region) && <small className="meta approx">{approx(l.price, l.currency, region)} in your currency</small>}
+        <h1>{l.title}</h1>{!l.is_mine && <MarketSafety />}<b className="price">{money(l.price, l.currency)}</b>{approx(l.price, l.currency, region) && <small className="meta approx">{approx(l.price, l.currency, region)} in your currency</small>}
         <p className="meta">{l.category}{l.location ? ` · ${l.location}` : ''} · listed {timeAgo(l.created_at)}</p>
         {l.description && <p className="body">{l.description}</p>}
         <Link to={`/u/${l.seller.username}`} className="person card"><Avatar user={l.seller} size={44} /><span className="grow"><b>{l.seller.full_name}</b><small className="meta">Seller · view profile to contact</small></span><Icon name="chev" /></Link>

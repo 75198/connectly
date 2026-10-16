@@ -30,6 +30,7 @@ import { registerRound8, recordActivity } from './round8.js';
 import { registerNews, recordSearch } from './news.js';
 import { registerPricing } from './pricing.js';
 import { registerDownloads } from './download.js';
+import { registerRound10 } from './round10.js';
 import { registerBackfill } from './backfill.js';
 import { registerRound9, notifyMentions, allowedBy, isRestricted } from './round9.js';
 import { hiddenWordsOf, matchesHidden } from './messages.js';
@@ -137,7 +138,7 @@ function liveConnectSrc() {
 }
 export function round78Features() {
   const f = config.features; const out = {};
-  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads'])
+  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads', 'autoTranslate', 'friendsFeed', 'aiCreator', 'tips', 'liteMode', 'safetyCenter', 'antiScam', 'msgControls'])
     out[k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] = !!f[k];
   return out;
 }
@@ -169,6 +170,27 @@ async function applyPostExtras(req, postId, body) {
   if (d.effect && config.features.arEffects) await q('UPDATE posts SET effect = $2 WHERE id = $1', [postId, d.effect]);
 }
 export { applyPostExtras };
+// Permanently deletes an account and its uploaded files (used by immediate deletion and the 30-day grace purge).
+// Anti-scam: flag young, unverified accounts whose name (or username) copies a verified account's.
+export async function checkImpersonation(uid) {
+  if (!config.features.antiScam) return;
+  const { rows: [m] } = await q(`SELECT v.username FROM users u JOIN users v ON v.id <> u.id AND v.verified_at IS NOT NULL
+    AND (lower(regexp_replace(v.full_name, '\\s+', ' ', 'g')) = lower(regexp_replace(u.full_name, '\\s+', ' ', 'g'))
+      OR (length(v.username) >= 5 AND regexp_replace(lower(u.username), '[^a-z0-9]', '', 'g') LIKE '%' || regexp_replace(lower(v.username), '[^a-z0-9]', '', 'g') || '%'))
+    WHERE u.id = $1 AND u.verified_at IS NULL AND u.created_at > now() - interval '60 days' LIMIT 1`, [uid]);
+  if (m) await q("INSERT INTO safety_flags (user_id, kind, detail) VALUES ($1, 'impersonation', $2) ON CONFLICT DO NOTHING", [uid, `Name looks like verified @${m.username}`]);
+}
+export async function purgeUser(uid) {
+  const { rows: files } = await q(`SELECT avatar_path AS p FROM users WHERE id = $1 UNION ALL SELECT cover_path FROM users WHERE id = $1
+    UNION ALL SELECT unnest(ARRAY[image_path, video_path, poster_path, video_low_path]) FROM posts WHERE author_id = $1 OR space_id IN (SELECT id FROM spaces WHERE owner_id = $1) UNION ALL SELECT image_path FROM stories WHERE author_id = $1
+    UNION ALL SELECT photo_path FROM spaces WHERE owner_id = $1 UNION ALL SELECT ph.path FROM listing_photos ph JOIN listings l ON l.id = ph.listing_id WHERE l.seller_id = $1`, [uid]);
+  await q('DELETE FROM users WHERE id = $1', [uid]); // cascades
+  for (const f of files) removeImage(f.p);
+}
+export async function purgeScheduledDeletions() {
+  const { rows } = await q('SELECT id FROM users WHERE delete_after IS NOT NULL AND delete_after < now() AND deactivated_at IS NOT NULL LIMIT 50');
+  for (const r of rows) { try { await purgeUser(r.id); } catch (e) { console.error('[purge user]', e.message); } }
+}
 export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
@@ -203,7 +225,7 @@ export function createApp() {
   // ---------- auth ----------
   // Signup: the client collects identifier+password, name, DOB and terms over several screens,
   // then calls /auth/register once. Only then is a *pending* account created and a code sent.
-  const Ident = z.object({ identifier: z.string().max(200), country: z.string().length(2).toUpperCase().default('NG') });
+  const Ident = z.object({ identifier: z.string().max(200), country: z.string().length(2).toUpperCase().default('US') });
   const requireChannel = (id) => {
     if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
   };
@@ -266,6 +288,7 @@ export function createApp() {
     const r = await consumeCode(keyOf(id), 'verify_email', d.code);
     if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
     await q('UPDATE users SET email_verified_at = now() WHERE id = $1', [u.id]);
+    checkImpersonation(u.id).catch(() => {});
     await createSession(res, u.id, req.get('user-agent'), req, 'signup'); // auto-login after verification
     await loginAlert(u.id, req.get('user-agent'));
     if (u.email) sendMail({ to: u.email, subject: 'Welcome to Connectly', text: welcomeText(u.full_name) }).catch((e) => console.error('[welcome]', e.message));
@@ -284,7 +307,7 @@ export function createApp() {
   api.post('/auth/login', loginLimiter, loginIdLimiter, async (req, res) => {
     const d = LoginSchema.parse(req.body);
     let accts;
-    try { accts = await accountsFor(parseIdentifier(d.login, d.country || 'NG'), { verifiedOnly: false }); }
+    try { accts = await accountsFor(parseIdentifier(d.login, d.country || 'US'), { verifiedOnly: false }); }
     catch { accts = (await q('SELECT id, password_hash, email_verified_at, deactivated_at FROM users WHERE lower(username) = lower($1)', [d.login])).rows; }
     const verified = accts.filter((a) => a.email_verified_at), pending = accts.filter((a) => !a.email_verified_at);
     const hit = await matchPassword(verified, d.password);
@@ -296,7 +319,7 @@ export function createApp() {
     const { rows: sus } = await q('SELECT suspended_at FROM users WHERE id = $1', [hit.id]);
     if (sus[0]?.suspended_at) return res.status(403).json({ error: 'This account has been suspended for breaking the Community Standards.', code: 'SUSPENDED' });
     const reactivated = Boolean(hit.deactivated_at);
-    if (reactivated) await q('UPDATE users SET deactivated_at = NULL WHERE id = $1', [hit.id]);
+    if (reactivated) await q('UPDATE users SET deactivated_at = NULL, delete_after = NULL WHERE id = $1', [hit.id]);
     const tw = await twoStepMethods(hit.id);
     if (tw) return res.json(await startTwoStep(hit.id, req.get('user-agent'), tw));
     await createSession(res, hit.id, req.get('user-agent'), req);
@@ -313,7 +336,7 @@ export function createApp() {
   };
   const mask = (id) => id.type === 'email' ? id.value.replace(/^(.)(.*)(@.*)$/, (_m, a, b, c) => a + '•'.repeat(Math.min(b.length, 6)) + c) : id.value.slice(0, 4) + '•••••' + id.value.slice(-2);
   const sendIdentCode = (purpose) => async (req, res) => {
-    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('NG') }).strict().parse(req.body);
+    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('US') }).strict().parse(req.body);
     const id = await resolveQuery(d.identifier, d.country);
     if (id) {
       requireChannel(id);
@@ -328,7 +351,7 @@ export function createApp() {
   api.post('/auth/forgot', codeLimiter, sendIdentCode('reset_password'));
   api.post('/auth/find', codeLimiter, sendIdentCode('find_account'));
   api.post('/auth/code-accounts', codeLimiter, async (req, res) => {
-    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('NG'), code: Code, purpose: z.enum(['reset_password', 'find_account']) }).strict().parse(req.body);
+    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('US'), code: Code, purpose: z.enum(['reset_password', 'find_account']) }).strict().parse(req.body);
     const id = await resolveQuery(d.identifier, d.country);
     const r = id ? await consumeCode(keyOf(id), d.purpose, d.code) : 'expired';
     if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
@@ -352,7 +375,7 @@ export function createApp() {
 
   api.get('/me', requireAuth, async (req, res) => {
     const { rows } = await q('SELECT * FROM users WHERE id = $1', [req.user.id]);
-    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility, theme_pref: rows[0].theme_pref, public_contact: rows[0].public_contact || '', show_contact: !!rows[0].show_contact, locale: rows[0].locale, text_scale: rows[0].text_scale ?? null, hide_like_counts: rows[0].hide_like_counts, two_step: !!rows[0].totp_enabled_at || rows[0].two_step_email,
+    res.json({ ...publicUser(rows[0]), email: rows[0].email, phone: rows[0].phone, birth_date: rows[0].birth_date, email_verified: Boolean(rows[0].email_verified_at), onboarded: Boolean(rows[0].onboarded_at), email_notifications: rows[0].email_notifications, inapp_notifications: rows[0].inapp_notifications, default_post_visibility: rows[0].default_post_visibility, profile_details_visibility: rows[0].profile_details_visibility, theme_pref: rows[0].theme_pref, public_contact: rows[0].public_contact || '', auto_translate: !!rows[0].auto_translate, lite_mode: rows[0].lite_mode || 'auto', show_contact: !!rows[0].show_contact, locale: rows[0].locale, text_scale: rows[0].text_scale ?? null, hide_like_counts: rows[0].hide_like_counts, two_step: !!rows[0].totp_enabled_at || rows[0].two_step_email,
       acting_as: req.user.acting_space_id ? (await q('SELECT id, slug, name, photo_path FROM spaces WHERE id = $1', [req.user.acting_space_id])).rows[0] || null : null,
       unread_notifications: (await q('SELECT count(*) AS n FROM notifications WHERE user_id = $1 AND read_at IS NULL', [req.user.id])).rows[0].n, current_place_id: rows[0].current_place_id, hometown_place_id: rows[0].hometown_place_id, roles: req.user.roles });
   });
@@ -373,6 +396,7 @@ export function createApp() {
     vals.push(req.user.id);
     try {
       const { rows } = await q(`UPDATE users SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length} RETURNING *`, vals);
+      if (d.full_name || d.username) await checkImpersonation(req.user.id).catch(() => {});
       res.json(publicUser(rows[0]));
     } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'That username is taken' }); throw e; }
   };
@@ -433,6 +457,13 @@ export function createApp() {
     OR (p.space_id IS NOT NULL AND EXISTS (SELECT 1 FROM space_members sm WHERE sm.user_id = $1 AND sm.space_id = p.space_id))
     OR NOT EXISTS (SELECT 1 FROM follows f0 WHERE f0.follower_id = $1)) AND NOT EXISTS (SELECT 1 FROM mutes mu WHERE mu.user_id = $1 AND mu.target_id = p.author_id AND mu.posts)`;
   api.get('/feed', requireAuth, async (req, res) => res.json(await pagePosts(req.user.id, FEED_SCOPE, [], req.query.cursor, req.query.limit)));
+  // Real friends: only close friends and mutual follows. No ads, suggestions or strangers.
+  api.get('/feed/friends', requireAuth, async (req, res) => {
+    if (!config.features.friendsFeed) return res.status(404).json({ error: 'Not found' });
+    res.json(await pagePosts(req.user.id, `p.kind = 'post' AND p.as_space_id IS NULL AND p.author_id <> $1 AND (
+      EXISTS (SELECT 1 FROM close_friends cf WHERE cf.user_id = $1 AND cf.friend_id = p.author_id)
+      OR (EXISTS (SELECT 1 FROM follows a WHERE a.follower_id = $1 AND a.followee_id = p.author_id) AND EXISTS (SELECT 1 FROM follows b WHERE b.follower_id = p.author_id AND b.followee_id = $1)))`, [], req.query.cursor, req.query.limit));
+  });
   api.post('/posts', requireVerified, upload.single('image'), async (req, res) => {
     const d = PostCreateSchema.parse({ body: req.body?.body ?? '', visibility: req.body?.visibility || undefined, feeling: req.body?.feeling || undefined, location_tag: req.body?.location_tag || undefined, as_draft: req.body?.as_draft || undefined, enhance: req.body?.enhance || undefined });
     if (!d.body && !req.file) return res.status(400).json({ error: 'Write something or add a photo' });
@@ -591,14 +622,15 @@ export function createApp() {
     res.clearCookie('cx_session', { path: '/' });
     res.json({ ok: true });
   });
-  // Permanent and immediate: deletes the account, posts, comments, likes and uploaded files.
+  // With the Safety Center on: deletion is scheduled for 30 days later (logging in again cancels it). Otherwise immediate.
   api.post('/me/delete', requireAuth, async (req, res) => {
     await checkPassword(req);
-    const { rows: files } = await q(`SELECT avatar_path AS p FROM users WHERE id = $1 UNION ALL SELECT cover_path FROM users WHERE id = $1
-      UNION ALL SELECT unnest(ARRAY[image_path, video_path, poster_path, video_low_path]) FROM posts WHERE author_id = $1 OR space_id IN (SELECT id FROM spaces WHERE owner_id = $1) UNION ALL SELECT image_path FROM stories WHERE author_id = $1
-      UNION ALL SELECT photo_path FROM spaces WHERE owner_id = $1 UNION ALL SELECT ph.path FROM listing_photos ph JOIN listings l ON l.id = ph.listing_id WHERE l.seller_id = $1`, [req.user.id]);
-    await q('DELETE FROM users WHERE id = $1', [req.user.id]); // cascades to sessions, posts, comments, likes, etc.
-    for (const f of files) removeImage(f.p);
+    if (config.features.safetyCenter) {
+      await q("UPDATE users SET deactivated_at = now(), delete_after = now() + interval '30 days' WHERE id = $1", [req.user.id]);
+      await q('DELETE FROM sessions WHERE user_id = $1', [req.user.id]);
+      res.clearCookie('cx_session', { path: '/' }); return res.json({ ok: true, scheduled: true });
+    }
+    await purgeUser(req.user.id);
     res.clearCookie('cx_session', { path: '/' });
     res.json({ ok: true });
   });
@@ -656,6 +688,7 @@ export function createApp() {
   registerNews(api, { requireAuth });
   registerPricing(api, { requireAuth, requireAdmin });
   registerDownloads(api, { requireAuth, id });
+  registerRound10(api, { requireAuth, requireModerator, id });
   registerBackfill(api, { requireAuth });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
@@ -688,12 +721,20 @@ export function createApp() {
         json_build_object('id', tu.id, 'username', tu.username, 'full_name', tu.full_name, 'suspended_at', tu.suspended_at) AS target_user,
         (SELECT count(*)::int FROM reports r2 WHERE r2.target_user_id = r.target_user_id) AS reports_against_user
       FROM reports r JOIN users ru ON ru.id = r.reporter_id LEFT JOIN users tu ON tu.id = r.target_user_id LEFT JOIN posts p ON p.id = r.post_id
-      WHERE ($1 = 'all' OR r.status = $1) ORDER BY r.id DESC LIMIT 200`, [status]);
+      WHERE ($1 = 'all' OR r.status = $1) ORDER BY (r.status = 'open' AND r.reason ILIKE 'scam%') DESC, r.id DESC LIMIT 200`, [status]);
     res.json({ items: rows });
   });
-  const closeReports = (where, params, resolution, by) => q(`UPDATE reports SET status = 'actioned', resolution = $${params.length + 1}, handled_by = $${params.length + 2}, resolved_at = now() WHERE status = 'open' AND ${where}`, [...params, resolution, by]);
+  const closeReports = async (where, params, resolution, by) => {
+    const { rows } = await q(`UPDATE reports SET status = 'actioned', resolution = $${params.length + 1}, handled_by = $${params.length + 2}, resolved_at = now() WHERE status = 'open' AND ${where} RETURNING reporter_id`, [...params, resolution, by]);
+    if (config.features.safetyCenter) for (const r of rows) await notify(r.reporter_id, by, 'report_actioned');
+  };
+  api.get('/me/reports', requireAuth, async (req, res) => {
+    const { rows } = await q("SELECT id, target_type, reason, status, created_at, resolved_at FROM reports WHERE reporter_id = $1 ORDER BY id DESC LIMIT 50", [req.user.id]);
+    res.json({ items: rows });
+  });
   api.post('/admin/reports/:id/dismiss', requireModerator, async (req, res) => {
-    await q("UPDATE reports SET status = 'dismissed', resolution = 'dismissed', handled_by = $2, resolved_at = now() WHERE id = $1", [id(req.params.id), req.user.id]);
+    const { rows: rr } = await q("UPDATE reports SET status = 'dismissed', resolution = 'dismissed', handled_by = $2, resolved_at = now() WHERE id = $1 RETURNING reporter_id", [id(req.params.id), req.user.id]);
+    if (config.features.safetyCenter && rr[0]) await notify(rr[0].reporter_id, req.user.id, 'report_reviewed');
     res.json({ ok: true });
   });
   // Hiding/suspending never deletes anything: it sets a timestamp that can be undone.

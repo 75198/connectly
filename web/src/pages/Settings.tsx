@@ -1,7 +1,9 @@
+import { guessCountry } from '../lib/region';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, deviceName, getFeatures, timeAgo } from '../api';
 import { useSession } from '../session';
+import { useFeatures } from '../api';
 import { Avatar, Icon } from '../components/ui';
 import { IdentifierInput } from '../components/Identifier';
 import { CodeInput } from './Auth';
@@ -9,11 +11,13 @@ import { CloseFriendsSection, ExtraLinks, LanguageSection, MessagingSection, Pus
 
 import { TextSize } from './TextSize';
 import { RegionSection } from './Region';
+import { LiteSection } from './SettingsExtra';
+import { SafetyCenter } from './Safety';
 import { FollowRequests, PeopleList, PrivacyCenter } from './PrivacyCenter';
 const SECTIONS: [string, string, Parameters<typeof Icon>[0]['name']][] = [
   ['account', 'Edit account', 'user'], ['email', 'Change email', 'chat'], ['phone', 'Change phone number', 'chat'], ['password', 'Change password', 'lock'],
   ['blocked', 'Blocked accounts', 'shield'], ['activity', 'Your activity log', 'flag'], ['sessions', 'Where you’re logged in', 'globe'], ['logins', 'Login history', 'globe'],
-  ['privacy', 'Post and profile privacy', 'lock'], ['notifications', 'Notifications', 'bell'], ['text-size', 'Text size', 'sliders'], ['region', 'Country and currency', 'globe'], ['deactivate', 'Deactivate or delete account', 'x'],
+  ['safety', 'Safety Center', 'shield'], ['privacy', 'Post and profile privacy', 'lock'], ['notifications', 'Notifications', 'bell'], ['text-size', 'Text size', 'sliders'], ['region', 'Country and currency', 'globe'], ['lite', 'Lite mode', 'sliders'], ['deactivate', 'Deactivate or delete account', 'x'],
 ];
 const Back = ({ title }: { title: string }) => <div className="row"><Link to="/settings" className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">{title}</h1></div>;
 
@@ -41,7 +45,7 @@ export function Settings() {
 
 export function SettingsSection() {
   const { section = '' } = useParams();
-  const C = ({ 'privacy-center': PrivacyCenter, 'follow-requests': FollowRequests, restricted: () => <PeopleList kind="restricted" />, muted: () => <PeopleList kind="muted" />, 'text-size': TextSize, region: RegionSection, account: Account, email: () => <ChangeId kind="email" />, phone: () => <ChangeId kind="phone" />, password: Password, blocked: Blocked, activity: Activity, sessions: Sessions, logins: Logins, privacy: Privacy, notifications: Notifications, deactivate: Deactivate, language: LanguageSection, sounds: SoundsSection, security: SecuritySection, verification: VerifySection, 'close-friends': CloseFriendsSection, messaging: MessagingSection } as Record<string, () => JSX.Element>)[section];
+  const C = ({ 'privacy-center': PrivacyCenter, 'follow-requests': FollowRequests, restricted: () => <PeopleList kind="restricted" />, muted: () => <PeopleList kind="muted" />, 'text-size': TextSize, region: RegionSection, lite: LiteSection, safety: SafetyCenter, account: Account, email: () => <ChangeId kind="email" />, phone: () => <ChangeId kind="phone" />, password: Password, blocked: Blocked, activity: Activity, sessions: Sessions, logins: Logins, privacy: Privacy, notifications: Notifications, deactivate: Deactivate, language: LanguageSection, sounds: SoundsSection, security: SecuritySection, verification: VerifySection, 'close-friends': CloseFriendsSection, messaging: MessagingSection } as Record<string, () => JSX.Element>)[section];
   if (!C) return <div className="card empty">Not found. <Link to="/settings">Back to settings</Link></div>;
   return <C />;
 }
@@ -65,7 +69,7 @@ function Account() {
 
 function ChangeId({ kind }: { kind: 'email' | 'phone' }) {
   const { me, refresh } = useSession(); const s = useStatus();
-  const [val, setVal] = useState(''); const [country, setCountry] = useState('NG'); const [pw, setPw] = useState(''); const [code, setCode] = useState(''); const [sent, setSent] = useState('');
+  const [val, setVal] = useState(''); const [country, setCountry] = useState(guessCountry); const [pw, setPw] = useState(''); const [code, setCode] = useState(''); const [sent, setSent] = useState('');
   if (!me) return null;
   const start = (e: FormEvent) => { e.preventDefault(); s.run(async () => { const r = await api<{ sent_to: string; type: string }>('/me/identifier/start', { json: { identifier: val, country, password: pw } }); if (r.type !== kind) throw new Error(kind === 'email' ? 'Enter an email address' : 'Enter a phone number'); setSent(r.sent_to); }); };
   const confirm = (e: FormEvent) => { e.preventDefault(); s.run(async () => { await api('/me/identifier/confirm', { json: { identifier: sent, country, code } }); await refresh(); setSent(''); setVal(''); setPw(''); setCode(''); s.setMsg(kind === 'email' ? 'Email updated' : 'Phone number updated'); }); };
@@ -176,16 +180,17 @@ function Notifications() {
 function Deactivate() {
   const nav = useNavigate(); const { refresh } = useSession(); const s = useStatus();
   const [pw, setPw] = useState(''); const [pw2, setPw2] = useState(''); const [ack, setAck] = useState(false);
+  const grace = !!useFeatures()?.safety_center;
   return <div className="stack"><Back title="Deactivate or delete account" />
     <form className="card stack" onSubmit={(e) => { e.preventDefault(); s.run(async () => { await api('/me/deactivate', { json: { password: pw } }); await refresh(); nav('/login'); }); }}>
       <h3>Deactivate (temporary)</h3><p className="meta">Your profile and posts are hidden until you log in again. Nothing is deleted.</p>
       <label>Password<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} required autoComplete="current-password" /></label>
       <button className="btn ghost" disabled={s.busy}>Deactivate my account</button>
     </form>
-    <form className="card stack dangerzone" onSubmit={(e) => { e.preventDefault(); if (!confirm('Permanently delete your account now? This cannot be undone.')) return; s.run(async () => { await api('/me/delete', { json: { password: pw2 } }); await refresh(); nav('/login'); }); }}>
-      <h3>Delete permanently</h3>
-      <p className="meta">Deletes your account <b>immediately and forever</b>: profile, posts, photos, comments, likes, friends, pages and groups you own, and marketplace listings. This can’t be undone.</p>
-      <label className="check"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /><span>I understand this is permanent.</span></label>
+    <form className="card stack dangerzone" onSubmit={(e) => { e.preventDefault(); if (!confirm(grace ? 'Delete your account? It will be deleted for good in 30 days. Log in before then to cancel.' : 'Permanently delete your account now? This cannot be undone.')) return; s.run(async () => { await api('/me/delete', { json: { password: pw2 } }); await refresh(); nav('/login'); }); }}>
+      <h3>{grace ? 'Delete account' : 'Delete permanently'}</h3>
+      <p className="meta">{grace ? <>Your account is hidden right away and <b>deleted for good after 30 days</b>: profile, posts, photos, comments, likes, friends, pages and groups you own, and marketplace listings. Changed your mind? Just log in again within 30 days. <Link to="/settings/safety">Download your data first</Link>.</> : <>Deletes your account <b>immediately and forever</b>: profile, posts, photos, comments, likes, friends, pages and groups you own, and marketplace listings. This can’t be undone.</>}</p>
+      <label className="check"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /><span>{grace ? 'I understand my account will be deleted after 30 days.' : 'I understand this is permanent.'}</span></label>
       <label>Password<input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} required autoComplete="current-password" /></label>
       <button className="btn primary dangerbtn" disabled={s.busy || !ack}>Delete my account</button>
     </form>{s.view}

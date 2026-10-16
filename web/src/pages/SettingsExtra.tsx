@@ -5,6 +5,7 @@ import { api, deviceName, timeAgo, toast, useFeatures } from '../api';
 import { useSession } from '../session';
 import { LANGS, useI18n } from '../lib/i18n';
 import { setSoundsOn, sfx, soundsOn } from '../lib/sounds';
+import { autoSlow, litePref, setLitePref } from '../lib/lite';
 import { currentPush, disablePush, enablePush, pushSupported } from '../lib/push';
 import { Avatar, Icon, Spinner } from '../components/ui';
 import { VerifiedBadge } from '../components/Extras';
@@ -15,9 +16,23 @@ export const Toggle = ({ on, onChange, label }: { on: boolean; onChange: (v: boo
 export function LanguageSection() {
   const { lang, auto, setLang } = useI18n();
   const save = (code: string | null) => { setLang(code); api('/me/prefs', { method: 'PATCH', json: { locale: code } }).catch(() => {}); };
-  return <div className="stack"><Back title="Language" /><div className="card list langlist">
+  return <div className="stack"><Back title="Language" /><AutoTranslateCard /><div className="card list langlist">
     <button className={`optrow ${auto ? 'on' : ''}`} onClick={() => save(null)}><span className="grow"><b>Automatic</b><small className="meta">Use my device language</small></span>{auto && '✓'}</button>
     {LANGS.map((l) => <button key={l.code} className={`optrow ${!auto && lang === l.code ? 'on' : ''}`} onClick={() => save(l.code)} lang={l.code} dir={l.code === 'ar' ? 'rtl' : 'ltr'}><span className="grow"><b>{l.native}</b><small className="meta">{l.name}</small></span>{!auto && lang === l.code && '✓'}</button>)}</div></div>;
+}
+
+function AutoTranslateCard() {
+  const f = useFeatures(); const { me, refresh } = useSession(); const [on, setOn] = useState(!!me?.auto_translate);
+  if (!f?.auto_translate || !f?.translate) return null;
+  return <div className="card row between"><span className="grow"><b>Always translate</b><small className="meta block">Automatically translate posts, comments and messages into your language. Tap “See original” any time.</small></span>
+    <Toggle label="Always translate" on={on} onChange={async (v) => { setOn(v); try { await api('/me/prefs', { method: 'PATCH', json: { auto_translate: v } }); await refresh(); } catch (e: any) { toast(e.message, 'err'); setOn(!v); } }} /></div>;
+}
+export function LiteSection() {
+  const [p, setP] = useState(litePref()); const slow = autoSlow();
+  const pick = (v: 'auto' | 'on' | 'off') => { setP(v); setLitePref(v); api('/me/prefs', { method: 'PATCH', json: { lite_mode: v } }).catch(() => {}); toast('Saved'); };
+  return <div className="stack"><Back title="Lite mode" /><div className="card list">
+    {([['auto', 'Automatic', slow ? 'On now: your connection looks slow or Data Saver is on.' : 'Turns on by itself on slow connections or when Data Saver is on.'], ['on', 'Always on', 'Smaller photos, no autoplaying videos, fewer animations, lighter pages.'], ['off', 'Off', 'Full quality everywhere.']] as const).map(([v, t, h]) =>
+      <button key={v} className={`optrow ${p === v ? 'on' : ''}`} onClick={() => pick(v)}><span className="grow"><b>{t}</b><small className="meta">{h}</small></span>{p === v && '✓'}</button>)}</div></div>;
 }
 
 export function SoundsSection() {
@@ -94,5 +109,6 @@ export function ExtraLinks() {
   return <div className="card list">{L.filter((x) => x[0]).map(([, k, e, l]) => <Link key={k} to={`/settings/${k}`}><span className="emicon">{e}</span> <span className="grow">{l}</span><Icon name="chev" /></Link>)}
     {f.creator_tools && <Link to="/me/insights"><span className="emicon">📊</span> <span className="grow">Professional dashboard</span><Icon name="chev" /></Link>}
     {f.gifts && <Link to="/me/coins"><span className="emicon">🪙</span> <span className="grow">Coins</span><Icon name="chev" /></Link>}
+    {f.tips && <Link to="/me/earnings"><span className="emicon">📈</span> <span className="grow">Creator earnings</span><Icon name="chev" /></Link>}
     {f.streaks && <Link to="/me/streak"><span className="emicon">🔥</span> <span className="grow">Streaks and badges</span><Icon name="chev" /></Link>}</div>;
 }

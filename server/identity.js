@@ -5,7 +5,7 @@ import { q } from './db.js';
 
 const emailSchema = z.string().email().max(200);
 // Returns { type: 'email'|'phone', value } (email lowercased, phone in E.164) or throws 400.
-export function parseIdentifier(raw, country = 'NG') {
+export function parseIdentifier(raw, country = 'US') {
   const s = String(raw || '').trim();
   if (!s) throw new HttpError(400, 'Enter your email or phone number');
   if (s.includes('@')) {
@@ -14,7 +14,7 @@ export function parseIdentifier(raw, country = 'NG') {
     return { type: 'email', value: v };
   }
   if (!/^[+\d][\d\s().-]{4,}$/.test(s)) throw new HttpError(400, 'Enter a valid email or phone number');
-  const p = parsePhoneNumberFromString(s, /^[A-Z]{2}$/.test(country) ? country : 'NG');
+  const p = parsePhoneNumberFromString(s, /^[A-Z]{2}$/.test(country) ? country : 'US');
   if (!p || !p.isValid()) throw new HttpError(400, 'That phone number doesn’t look right for the selected country');
   return { type: 'phone', value: p.number };
 }
@@ -37,7 +37,7 @@ export const BirthDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter your dat
   .refine((s) => ageOn(s) <= 120, 'Enter a real date of birth')
   .refine((s) => ageOn(s) >= MIN_AGE, `You must be at least ${MIN_AGE} years old to use Connectly`);
 
-// Auto-generate a unique username from the full name, e.g. "Jimoh Mojeed" -> jimohmojeed, jimohmojeed27
+// Auto-generate a unique username from the full name, e.g. "Ada Lovelace" -> adalovelace, adalovelace27
 export async function generateUsername(fullName, client = { query: q }) {
   let base = fullName.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 15);
   if (base.length < 3) base = (base + 'user').slice(0, 15);

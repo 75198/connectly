@@ -206,3 +206,29 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 ## 25. Quality checks
 - `npm run test:e2e` (set `E2E_BASE` to a local server seeded with `SEED_DEMO=1`) visits every route at 320, 375, 390 and 430 px. It fails if anything scrolls sideways, a card renders blank, the page is blank, or there are console or page errors. Never run it against production.
 - Live AI speed (Oct 2026, server to Groq, short prompt): time to first token is about 270 ms on `openai/gpt-oss-20b` (the current chat model) and about 390 ms on `gpt-oss-120b`. Groq doesn't list the Llama chat models right now.
+
+## 26. Round 10 (migration 021)
+- **Translation** (`FEATURE_AUTO_TRANSLATE`, with `FEATURE_TRANSLATE`): "See translation" on posts, comments and DMs. Settings › Language › Always translate does it automatically. Groq translates and results are cached in `translations` (sha256 of the text plus the target language). Text already in your language is detected and remembered, so the button disappears.
+- **Friends feed** (`FEATURE_FRIENDS_FEED`): a Home tab, `GET /feed/friends`, showing only close friends and mutual follows. No news, films, suggestions or Reels banner.
+- **AI creator helper** (`FEATURE_AI_CREATOR`): in the composer's "Write with Connectly AI" panel there are Caption, Improve, Hashtags (tap to add) and Ideas buttons, plus Enhance photo, which turns on the editor's existing auto-enhance. Calls `POST /ai/creator`.
+- **Tips and earnings** (`FEATURE_TIPS`): coin tips on posts (⋯ menu) and profiles (🪙 button). `/me/earnings` shows totals, the last 30 days, a 14-day chart and top supporters. Gifts were already open to every creator who goes live. Buying coins and cashing out stay "Coming soon".
+- **Store rules:** in the iOS and Android apps, coins *must* be sold through Apple and Google in-app purchase (they take a 15–30% cut). Paying creators out needs a payout provider plus identity and tax checks. Don't add web checkout links inside the store apps.
+- **Lite mode** (`FEATURE_LITE_MODE`): Settings › Lite mode (Automatic / Always on / Off). Automatic means Data Saver is on, the connection is 2G/3G, or the device has very little memory. It shows 480px photos (`/api/img/lite`, cached in `uploads/.lite`), doesn't autoplay reels, turns off animations and blur, and loads smaller pages.
+- **Safety Center** (`FEATURE_SAFETY_CENTER`): Settings › Safety Center gathers every control in plain language. Deleting an account now has a 30-day grace period (logging in cancels it; an hourly job purges accounts after that). Reporting is one tap with reasons, and reporters get a notification when their report is reviewed or acted on. "Your reports" shows their status. /privacy and /terms are marked as templates that need a lawyer's review.
+- **Anti-scam** (`FEATURE_ANTI_SCAM`):
+  - Links in posts, comments and DMs are checked (a blocklist plus heuristics: lookalike brands, shorteners, IP or punycode hosts, risky domain endings, http) and risky ones show a warning first.
+  - DMs show a "Possible scam" banner when a new account asks about money, codes, passwords, crypto or investments.
+  - New unverified accounts copying a verified person's name are flagged in Admin › Safety flags.
+  - Accounts younger than 7 days can only start a few new chats a day with people who don't follow them.
+  - "Scam or fraud" reports go to the top of the admin list.
+  - Code screens and the AI say Connectly never asks for codes.
+  - Photo-copy detection isn't done yet.
+
+### 26.x Message controls (FEATURE_MSG_CONTROLS)
+- Edit own text message within 15 minutes: `PATCH /api/messages/:id` sets `edited_at`; bubbles show "Edited".
+- Delete for me: `POST /api/messages/:id/hide` (table `message_hidden`). Unsend for everyone stays `DELETE /api/messages/:id`.
+- Read receipts: `users.read_receipts` (Privacy › Messages). Reciprocal: off hides your "Seen" and others' from you.
+- Chat list shows a green dot / "Active Xm ago" from `sessions.last_seen_at`, hidden when either side hides activity status.
+
+### 26.y Global defaults
+- Phone country defaults come from the device (timezone/locale) with US fallback; server defaults are US. Currency comes from `/pricing/context` (USD fallback). Starter search ideas, sample text and the AI suggestions are location-neutral; news only localises lightly by region/language. Default language is "English (International)".

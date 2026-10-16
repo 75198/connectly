@@ -174,7 +174,7 @@ test('profile edit own only; cannot self-grant admin', async () => {
   await pool.query("INSERT INTO places (id, name, ascii_name, admin1, country, country_code, population, display) VALUES (2337639,'Ikeja','Ikeja','Lagos','Nigeria','NG',313196,'Ikeja, Lagos, Nigeria'), (5308655,'Phoenix','Phoenix','Arizona','United States','US',1600000,'Phoenix, Arizona, United States'), (2332459,'Lagos','Lagos','Lagos','Nigeria','NG',9000000,'Lagos, Nigeria')");
   let pl = await A.get('/api/places?q=ikej'); assert.equal(pl.body.items[0].display, 'Ikeja, Lagos, Nigeria');
   pl = await A.get('/api/places?q=Phoenix'); assert.equal(pl.body.items[0].display, 'Phoenix, Arizona, United States');
-  r = await A.patch('/api/me').set(H).send({ bio: 'Hello there', current_place_id: 2337639, hometown_place_id: 2332459, full_name: 'Alice Adeyemi',
+  r = await A.patch('/api/me').set(H).send({ bio: 'Hello there', current_place_id: 2337639, hometown_place_id: 2332459, full_name: 'Alice Abbott',
     interests: ['Music', 'Tech', 'Music'], relationship_status: 'Married', work_company: 'Acme', work_role: 'Designer', education: 'UNILAG' });
   assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.bio, 'Hello there'); assert.equal(r.body.location, 'Ikeja, Lagos, Nigeria'); assert.equal(r.body.hometown, 'Lagos, Nigeria');
   assert.deepEqual(r.body.interests, ['Music', 'Tech']);

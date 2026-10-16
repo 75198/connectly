@@ -61,9 +61,24 @@ export async function memberOf(convId, userId) {
   if (!rows[0]) throw new HttpError(404, 'Chat not found');
   return rows[0];
 }
-const MEMBERS = `(SELECT json_agg(json_build_object('id', u.id, 'username', u.username, 'full_name', u.full_name, 'avatar_path', u.avatar_path, 'verified', u.verified_at IS NOT NULL, 'last_read_id', CASE WHEN cm.accepted_at IS NOT NULL THEN cm.last_read_id ELSE 0 END, 'accepted', cm.accepted_at IS NOT NULL,
+// Anti-scam: accounts younger than 7 days can only start a few new chats a day with people who don't follow them.
+const strangerHits = new Map();
+async function strangerLimit(uid, ids) {
+  const { rows: [u] } = await q("SELECT created_at > now() - interval '7 days' AS young FROM users WHERE id = $1", [uid]); if (!u?.young) return false;
+  const { rows: st } = await q('SELECT u.id FROM unnest($2::bigint[]) AS u(id) WHERE NOT EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = u.id AND f.followee_id = $1) AND NOT EXISTS (SELECT 1 FROM conversations c JOIN conversation_members a ON a.conversation_id = c.id AND a.user_id = $1 JOIN conversation_members b ON b.conversation_id = c.id AND b.user_id = u.id)', [uid, ids]);
+  if (!st.length) return false;
+  const day = new Date().toISOString().slice(0, 10), k = `${uid}:${day}`, n = (strangerHits.get(k) || 0) + st.length;
+  if (n > 10) return true; strangerHits.set(k, n); if (strangerHits.size > 5000) strangerHits.clear(); return false;
+}
+// Activity status is reciprocal: if you hide yours, you can't see others'. Also never shown for the feature off.
+async function maskPresence(uid, convs) {
+  const { rows: [me] } = await q('SELECT hide_presence FROM users WHERE id = $1', [uid]);
+  const off = !config.features.hidePresence || !config.features.msgControls || me?.hide_presence;
+  for (const c of convs) for (const m of c.members || []) if (off || m.id === uid) delete m.active_at;
+}
+const MEMBERS = `(SELECT json_agg(json_build_object('id', u.id, 'username', u.username, 'full_name', u.full_name, 'avatar_path', u.avatar_path, 'verified', u.verified_at IS NOT NULL, 'new_account', u.created_at > now() - interval '30 days', 'last_read_id', CASE WHEN cm.accepted_at IS NOT NULL AND u.read_receipts THEN cm.last_read_id ELSE 0 END, 'active_at', CASE WHEN NOT COALESCE(u.hide_presence, false) THEN (SELECT max(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) END, 'accepted', cm.accepted_at IS NOT NULL,
   'typing', cm.accepted_at IS NOT NULL AND cm.typing_at > now() - interval '6 seconds') ORDER BY u.id) FROM conversation_members cm JOIN users u ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND cm.left_at IS NULL) AS members`;
-export const MSG_SELECT = `SELECT m.id, m.conversation_id, m.sender_id, m.kind, CASE WHEN m.deleted_at IS NULL THEN m.body ELSE '' END AS body, CASE WHEN m.deleted_at IS NULL THEN m.media_path END AS media_path, m.poster_path, m.media_hd, m.meta, m.created_at, m.expires_at, m.deleted_at IS NOT NULL AS deleted,
+export const MSG_SELECT = `SELECT m.id, m.conversation_id, m.sender_id, m.kind, CASE WHEN m.deleted_at IS NULL THEN m.body ELSE '' END AS body, CASE WHEN m.deleted_at IS NULL THEN m.media_path END AS media_path, m.poster_path, m.media_hd, m.meta, m.created_at, m.expires_at, m.edited_at, m.deleted_at IS NOT NULL AS deleted,
   (SELECT COALESCE(json_object_agg(r.user_id, r.emoji), '{}') FROM message_reactions r WHERE r.message_id = m.id) AS reactions FROM messages m`;
 
 export async function postMessage(conv, senderId, { kind = 'text', body = '', media_path = null, poster_path = null, media_hd = false, meta = {} }) {
@@ -94,6 +109,7 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
         (SELECT count(*)::int FROM messages um WHERE um.conversation_id = c.id AND um.id > me.last_read_id AND um.sender_id <> $1) AS unread, (me.accepted_at IS NULL) AS is_request
       FROM conversations c JOIN conversation_members me ON me.conversation_id = c.id AND me.user_id = $1 AND me.left_at IS NULL
       WHERE EXISTS (SELECT 1 FROM messages mm WHERE mm.conversation_id = c.id) OR c.created_by = $1 ORDER BY c.last_message_at DESC LIMIT 200`, [req.user.id]);
+    await maskPresence(req.user.id, rows);
     res.json({ items: rows });
   });
   api.get('/conversations/unread', requireAuth, on, async (req, res) => {
@@ -110,6 +126,7 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
     const { rows: closed } = await q(`SELECT u.id FROM users u WHERE u.id = ANY($1) AND (u.dm_privacy = 'off' OR (u.dm_privacy = 'following' AND NOT EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = u.id AND f.followee_id = $2)))`, [ids, req.user.id]);
     if (closed.length) return res.status(403).json({ error: ids.length === 1 ? 'This person isn’t accepting messages' : 'Some of these people aren’t accepting messages' });
     if (config.features.teenSafety && await teenBlocked(req.user.id, ids)) return res.status(403).json({ error: ids.length === 1 ? 'This person can’t get messages from you' : 'Some of these people can’t get messages from you' });
+    if (config.features.antiScam && await strangerLimit(req.user.id, ids)) return res.status(429).json({ error: 'You’ve started a lot of chats with people who don’t follow you. Try again tomorrow.' });
     if (ids.length === 1 && !d.title) {
       const key = [req.user.id, ids[0]].sort((a, b) => a - b).join(':');
       const { rows: ex } = await q('SELECT id FROM conversations WHERE direct_key = $1', [key]);
@@ -127,6 +144,7 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
   api.get('/conversations/:id', requireAuth, on, async (req, res) => {
     const c = await memberOf(id(req.params.id), req.user.id);
     const { rows: [full] } = await q(`SELECT c.id, c.is_group, c.title, c.created_by, ${MEMBERS} FROM conversations c WHERE c.id = $1`, [c.id]);
+    await maskPresence(req.user.id, [full]);
     const { rows: [pref] } = await q('SELECT theme, wallpaper_path FROM chat_prefs WHERE user_id = $1', [req.user.id]);
     res.json({ ...full, theme: c.my_theme || pref?.theme || 'default', wallpaper_path: c.my_wallpaper || pref?.wallpaper_path || null, chat_theme: { theme: c.my_theme, wallpaper_path: c.my_wallpaper }, all_chats_theme: pref || null, me: req.user.id });
   });
@@ -170,9 +188,12 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
     const c = await memberOf(id(req.params.id), req.user.id);
     const after = Number(req.query.after) || 0, before = Number(req.query.before) || 0;
     const { rows } = after
-      ? await q(`${MSG_SELECT} WHERE m.conversation_id = $1 AND m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > now()) ORDER BY m.id ASC LIMIT 200`, [c.id, after])
-      : await q(`SELECT * FROM (${MSG_SELECT} WHERE m.conversation_id = $1 AND (m.expires_at IS NULL OR m.expires_at > now()) ${before ? 'AND m.id < $2' : 'AND $2::bigint = 0'} ORDER BY m.id DESC LIMIT 50) x ORDER BY id ASC`, [c.id, before]);
-    const { rows: st } = await q("SELECT user_id, last_read_id, accepted_at IS NOT NULL AS accepted, typing_at > now() - interval '6 seconds' AS typing FROM conversation_members WHERE conversation_id = $1 AND left_at IS NULL", [c.id]);
+      ? await q(`${MSG_SELECT} WHERE m.conversation_id = $1 AND m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > now()) AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = $3) ORDER BY m.id ASC LIMIT 200`, [c.id, after, req.user.id])
+      : await q(`SELECT * FROM (${MSG_SELECT} WHERE m.conversation_id = $1 AND (m.expires_at IS NULL OR m.expires_at > now()) AND NOT EXISTS (SELECT 1 FROM message_hidden h WHERE h.message_id = m.id AND h.user_id = $3) ${before ? 'AND m.id < $2' : 'AND $2::bigint = 0'} ORDER BY m.id DESC LIMIT 50) x ORDER BY id ASC`, [c.id, before, req.user.id]);
+    const { rows: st0 } = await q("SELECT cm.user_id, cm.last_read_id, cm.accepted_at IS NOT NULL AS accepted, cm.typing_at > now() - interval '6 seconds' AS typing, u.read_receipts FROM conversation_members cm JOIN users u ON u.id = cm.user_id WHERE cm.conversation_id = $1 AND cm.left_at IS NULL", [c.id]);
+    // Read receipts are reciprocal: turn yours off and you can't see others' either.
+    const myRR = st0.find((s) => s.user_id === req.user.id)?.read_receipts !== false;
+    const st = config.features.msgControls ? st0.filter((s) => s.user_id === req.user.id || (myRR && s.read_receipts !== false)) : st0;
     if (config.features.hiddenWords) await filterHidden(req.user.id, rows);
     res.json({ items: rows, disappear_seconds: c.disappear_seconds ?? null, reads: Object.fromEntries(st.filter((s) => s.accepted || s.user_id === req.user.id).map((s) => [s.user_id, s.last_read_id])), is_request: !st.find((s) => s.user_id === req.user.id)?.accepted, typing: st.filter((s) => s.typing && s.accepted && s.user_id !== req.user.id).map((s) => s.user_id) });
   });
@@ -197,6 +218,20 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
   api.delete('/messages/:id', requireAuth, on, async (req, res) => {
     const { rowCount } = await q('UPDATE messages SET deleted_at = now() WHERE id = $1 AND sender_id = $2 AND deleted_at IS NULL', [id(req.params.id), req.user.id]);
     if (!rowCount) return res.status(404).json({ error: 'Message not found' }); res.json({ ok: true });
+  });
+  // Delete for me only (others still see it).
+  api.post('/messages/:id/hide', requireAuth, on, async (req, res) => {
+    if (!config.features.msgControls) return res.status(404).json({ error: 'Not found' });
+    const { rows: [m] } = await q('SELECT conversation_id FROM messages WHERE id = $1', [id(req.params.id)]); if (!m) return res.status(404).json({ error: 'Message not found' });
+    await memberOf(m.conversation_id, req.user.id);
+    await q('INSERT INTO message_hidden (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [id(req.params.id), req.user.id]); res.json({ ok: true });
+  });
+  // Edit your own text message within 15 minutes; shows "Edited".
+  api.patch('/messages/:id', requireAuth, on, async (req, res) => {
+    if (!config.features.msgControls) return res.status(404).json({ error: 'Not found' });
+    const { body } = z.object({ body: z.string().trim().min(1).max(4000) }).strict().parse(req.body);
+    const { rows } = await q(`UPDATE messages SET body = $3, edited_at = now() WHERE id = $1 AND sender_id = $2 AND kind = 'text' AND deleted_at IS NULL AND created_at > now() - interval '15 minutes' RETURNING id, body, edited_at`, [id(req.params.id), req.user.id, body]);
+    if (!rows[0]) return res.status(403).json({ error: 'You can only edit your own messages for a short time after sending.' }); res.json(rows[0]);
   });
   api.put('/messages/:id/reaction', requireAuth, on, async (req, res) => {
     const { emoji } = z.object({ emoji: z.string().min(1).max(40).refine((e) => /^:[a-z0-9_]{2,30}:$/.test(e) || [...new Intl.Segmenter().segment(e)].length === 1, 'Choose one emoji') }).strict().parse(req.body);

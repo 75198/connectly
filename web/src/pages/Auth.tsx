@@ -1,3 +1,4 @@
+import { guessCountry } from '../lib/region';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError, looksLikePhone } from '../api';
@@ -20,7 +21,7 @@ function useForm(fn: () => Promise<void>) {
   return { err, busy, submit };
 }
 export function CodeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return <input className="codeinput" value={value} onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} placeholder="••••••" aria-label="6-digit code" autoFocus required />;
+  return <><input className="codeinput" value={value} onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} placeholder="••••••" aria-label="6-digit code" autoFocus required /><small className="meta otpnote">🔒 Only enter this code here. Connectly will never ask for it in a message, call or chat.</small></>;
 }
 
 type Saved = { id: number; username: string; full_name: string; avatar_path: string | null };
@@ -41,7 +42,7 @@ function SavedAccounts() {
 export function Login() {
   const { refresh } = useSession(); const nav = useNavigate();
   const [sp] = useSearchParams();
-  const [login, setLogin] = useState(sp.get('u') || ''); const [country, setCountry] = useState('NG'); const [password, setPassword] = useState('');
+  const [login, setLogin] = useState(sp.get('u') || ''); const [country, setCountry] = useState(guessCountry); const [password, setPassword] = useState('');
   const [two, setTwo] = useState<{ ticket: string; methods: string[]; email_hint: string | null } | null>(null); const [method, setMethod] = useState('totp'); const [code2, setCode2] = useState('');
   const f = useForm(async () => {
     if (two) { await api('/auth/login/two-step', { json: { ticket: two.ticket, method, code: code2 } }); await refresh(); nav('/'); return; }
@@ -78,7 +79,7 @@ type Acct = { id: number; username: string; full_name: string; avatar_path: stri
 // Shared by "Forgot password" and "Find your account": send code -> enter code -> list accounts.
 function CodeAccounts({ purpose, title, intro, allowUsername }: { purpose: 'reset_password' | 'find_account'; title: string; intro: string; allowUsername?: boolean }) {
   const nav = useNavigate();
-  const [identifier, setIdentifier] = useState(''); const [country, setCountry] = useState('NG');
+  const [identifier, setIdentifier] = useState(''); const [country, setCountry] = useState(guessCountry);
   const [step, setStep] = useState<'id' | 'code' | 'pick' | 'password'>('id');
   const [code, setCode] = useState(''); const [info, setInfo] = useState('');
   const [data, setData] = useState<{ ticket: string; sent_to: string; login_identifier: string; accounts: Acct[] } | null>(null);

@@ -1,3 +1,4 @@
+import { pageSize } from '../lib/lite';
 import { Fragment } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, Page, Post } from '../api';
@@ -12,7 +13,7 @@ export function usePosts(path: string) {
     setLoading(true); setErr('');
     try {
       const sep = path.includes('?') ? '&' : '?';
-      const r = await api<Page<Post>>(`${path}${sep}limit=10${!reset && cursor ? `&cursor=${cursor}` : ''}`);
+      const r = await api<Page<Post>>(`${path}${sep}limit=${pageSize(10)}${!reset && cursor ? `&cursor=${cursor}` : ''}`);
       setItems((prev) => reset ? r.items : [...prev, ...r.items]); setCursor(r.next_cursor); setDone(!r.next_cursor);
     } catch (e: any) { setErr(e.message); } finally { setLoading(false); }
   }, [path, cursor]);

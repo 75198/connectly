@@ -4,6 +4,8 @@ import { api, authorHref, credit, Page, Post, Track, useFeatures } from '../api'
 import { RichText } from '../components/Extras';
 import { markSeen, unseenFirst } from '../components/Backfill';
 import { canOfferSave, saveToGallery } from '../lib/save';
+import { isLite, pageSize } from '../lib/lite';
+import { ReportSheet } from '../components/Report';
 import { MusicPicker } from '../components/MusicPicker';
 import { askPermission } from '../lib/permission';
 import { Avatar, Icon, Sheet, Spinner, VIS_LABEL } from '../components/ui';
@@ -62,7 +64,7 @@ export function Reels() {
 function ReelItem({ i, post, active, near, muted, onMute, onChange, onComments }: { i: number; post: Post; active: boolean; near: boolean; muted: boolean; onMute: () => void; onChange: (p: Post) => void; onComments: () => void }) {
   const ff = useFeatures(); const nav = useNavigate();
   const v = useRef<HTMLVideoElement>(null); const viewed = useRef(false);
-  const [paused, setPaused] = useState(false); const [note, setNote] = useState('');
+  const [paused, setPaused] = useState(isLite()); const [note, setNote] = useState('');
   useEffect(() => {
     const el = v.current; if (!el) return;
     if (active && !paused) el.play().catch(() => setPaused(true)); else el.pause();
@@ -86,12 +88,10 @@ function ReelItem({ i, post, active, near, muted, onMute, onChange, onComments }
     const url = `${location.origin}/reels/${post.id}`;
     try { if (navigator.share) { await navigator.share({ title: 'Connectly reel', text: post.body.slice(0, 100), url }); trackShare(post.id, 'native'); } else { await navigator.clipboard.writeText(url); flash('Link copied'); trackShare(post.id, 'copy_link'); } onChange({ ...post, share_count: (post.share_count || 0) + 1 }); } catch { /* cancelled */ }
   }
-  async function report() {
-    const reason = prompt('Why are you reporting this reel? (spam, harassment, hate speech, scam…)');
-    if (!reason?.trim()) return;
-    try { await api('/reports', { json: { target_type: 'post', post_id: post.id, reason: reason.trim() } }); flash('Thanks. Our moderators will review it.'); } catch (e: any) { flash(e.message); }
-  }
+  const [reporting, setReporting] = useState(false);
+  function report() { setReporting(true); }
   return <section className="reel" data-i={i} aria-label={`Reel by ${post.author.full_name}`}>
+    {reporting && <ReportSheet target={{ target_type: 'post', post_id: post.id }} onClose={() => setReporting(false)} />}
     <video ref={v} className="reelvideo" src={near ? ((slowNet() && post.video_low_path) || post.video_path!) : undefined} poster={post.poster_path || undefined} playsInline loop muted={muted}
       preload={active ? 'auto' : near && !saveData() ? 'metadata' : 'none'} onTimeUpdate={onTime} onClick={() => (muted ? onMute() : setPaused((p) => !p))} />
     {paused && active && <button className="reelplay" aria-label="Play" onClick={() => setPaused(false)}><Icon name="play" /></button>}
@@ -187,7 +187,7 @@ type Clip = { id: string; title: string; credit: string; license: string; licens
 // Backfill clip from an openly licensed film, labelled with its source and licence.
 function ClipReel({ c, i, active, muted, onMute }: { c: Clip; i: number; active: boolean; muted: boolean; onMute: () => void }) {
   const v = useRef<HTMLVideoElement>(null);
-  useEffect(() => { const el = v.current; if (!el) return; if (active) { markSeen(c.id); el.play().catch(() => {}); } else el.pause(); }, [active, c.id]);
+  useEffect(() => { const el = v.current; if (!el) return; if (active && !isLite()) { markSeen(c.id); el.play().catch(() => {}); } else if (active) markSeen(c.id); else el.pause(); }, [active, c.id]);
   return <section className="reel" data-i={i}>
     <video ref={v} className="reelvideo" src={c.video} poster={c.poster} muted={muted} loop playsInline preload={active ? 'auto' : 'none'} onClick={onMute} />
     <button className="reelmute btn icon reelbtn" aria-label={muted ? 'Unmute' : 'Mute'} onClick={onMute}><Icon name={muted ? 'mute' : 'volume'} /></button>

@@ -21,7 +21,7 @@ export function Admin() {
   useEffect(() => { load(); }, []);
   if (!me?.roles?.includes('admin')) return <div className="card empty">Admins only.</div>;
   const setRole = async (u: AU, role: string, on: boolean) => { try { await api(on ? `/admin/users/${u.id}/roles` : `/admin/users/${u.id}/roles/${role}`, on ? { json: { role } } : { method: 'DELETE' }); load(); } catch (e: any) { setErr(e.message); } };
-  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminPrices /><AdminExtras users={users} />
+  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminPrices /><AdminFlags /><AdminExtras users={users} />
     <h1 className="pagetitle">Admin</h1>
     {err && <p className="error card">{err}</p>}
     {status && <section className="card"><h3>Email delivery</h3><p className={status.smtp_configured ? 'success' : 'notice'}>{status.note}</p></section>}
@@ -78,3 +78,13 @@ function AdminExtras({ users }: { users: AU[] }) {
       {msg && <p className="meta" role="status">{msg}</p>}
     </section></>;
 }
+
+function AdminFlags() {
+  const [items, setItems] = useState<any[] | null>(null);
+  const load = () => api<{ items: any[] }>('/admin/safety-flags').then((r) => setItems(r.items)).catch(() => setItems(null));
+  useEffect(() => { load(); }, []);
+  if (!items) return null;
+  return <section className="card stack"><h3>Safety flags</h3><p className="meta">Automatic checks, such as new accounts copying a verified person’s name. Scam reports appear first in the reports list.</p>
+    {items.length === 0 ? <p className="meta">Nothing flagged right now.</p> : items.map((f) => <div key={f.id} className="row between"><span><a href={`/u/${f.username}`}>@{f.username}</a> · {f.detail}</span><button className="btn ghost" onClick={() => api(`/admin/safety-flags/${f.id}/resolve`, { method: 'POST' }).then(load)}>Mark reviewed</button></div>)}</section>;
+}
+

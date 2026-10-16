@@ -12,7 +12,7 @@ export function TextSize() {
   return <div className="stack">
     <div className="row"><Link to="/settings" className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">Text size</h1></div>
     <section className="card stack">
-      <div className="tspreview" aria-live="polite"><b>Ada Lovelace</b><p>Golden hour in Lagos 🌅 This is how posts, messages and menus will look.</p><small className="meta">2 h · Public</small></div>
+      <div className="tspreview" aria-live="polite"><b>Ada Lovelace</b><p>Golden hour by the sea 🌅 This is how posts, messages and menus will look.</p><small className="meta">2 h · Public</small></div>
       <div className="tsslider"><span className="tsa sm" aria-hidden="true">A</span>
         <input type="range" min={0.85} max={1.4} step={0.05} value={v} aria-label="Text size" aria-valuetext={label} onChange={(e) => set(Number(e.target.value))} onPointerUp={() => save()} onKeyUp={() => save()} />
         <span className="tsa lg" aria-hidden="true">A</span></div>

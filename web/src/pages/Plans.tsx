@@ -95,7 +95,7 @@ export function AdminPrices() {
     <form className="row wrap adminplan" onSubmit={(e) => { e.preventDefault(); add(e.currentTarget); }}>
       <label>Item <select name="item">{items.map((i) => <option key={i}>{i}</option>)}</select></label>
       <label>Country <input name="country" required maxLength={2} size={3} placeholder="NG" /></label>
-      <label>Currency <input name="currency" required maxLength={3} size={4} placeholder="NGN" /></label>
+      <label>Currency <input name="currency" required maxLength={3} size={4} placeholder="Currency code" /></label>
       <label>Amount <input name="amount" required type="number" step="0.01" min="0" /></label><button className="btn ghost">Add</button></form>
   </section>;
 }

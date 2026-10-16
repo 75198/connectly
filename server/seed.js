@@ -13,7 +13,7 @@ async function upsert(username, display, email, pw) {
 }
 // Demo accounts are for local development only (SEED_DEMO=1). Production seeds only the admin.
 if (process.env.SEED_DEMO === '1') {
-  await upsert('alice', 'Alice Adeyemi', 'alice@example.com', 'Connectly123!');
+  await upsert('alice', 'Alice Abbott', 'alice@example.com', 'Connectly123!');
   await upsert('bob', 'Bob Okafor', 'bob@example.com', 'Connectly123!');
 }
 const credFile = process.env.ADMIN_CREDENTIALS_FILE || 'ADMIN_CREDENTIALS.txt';

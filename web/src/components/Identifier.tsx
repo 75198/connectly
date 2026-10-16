@@ -16,11 +16,11 @@ async function loadCountries(): Promise<Country[]> {
 export function IdentifierInput({ value, onChange, country, onCountry, autoFocus }: { value: string; onChange: (v: string) => void; country: string; onCountry: (c: string) => void; autoFocus?: boolean }) {
   const phone = looksLikePhone(value);
   const [list, setList] = useState<Country[] | null>(cache);
-  useEffect(() => { if (phone && !list) loadCountries().then(setList).catch(() => setList([{ code: 'NG', dial: '234', name: 'Nigeria' }])); }, [phone, list]);
+  useEffect(() => { if (phone && !list) loadCountries().then(setList).catch(() => setList([{ code: 'US', dial: '1', name: 'United States' }])); }, [phone, list]);
   return <label>Email or phone number
     <div className="phonerow">
       {phone && <select aria-label="Country code" value={country} onChange={(e) => onCountry(e.target.value)}>
-        {(list || [{ code: 'NG', dial: '234', name: 'Nigeria' }]).map((c) => <option key={c.code} value={c.code}>{c.name} +{c.dial}</option>)}
+        {(list || [{ code: 'US', dial: '1', name: 'United States' }]).map((c) => <option key={c.code} value={c.code}>{c.name} +{c.dial}</option>)}
       </select>}
       <input value={value} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} required autoCapitalize="none" autoCorrect="off" spellCheck={false}
         inputMode={phone ? 'tel' : 'email'} autoComplete="username" maxLength={200} />

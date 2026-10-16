@@ -1,3 +1,4 @@
+import { guessCountry } from '../lib/region';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, ageFrom, looksLikePhone, NAME_RE } from '../api';
@@ -12,7 +13,7 @@ export function Signup() {
   const [sp] = useSearchParams();
   const resume = sp.get('verify');
   const [step, setStep] = useState(resume ? 4 : 0);
-  const [identifier, setIdentifier] = useState(resume || ''); const [country, setCountry] = useState(sp.get('country') || 'NG');
+  const [identifier, setIdentifier] = useState(resume || ''); const [country, setCountry] = useState(() => sp.get('country') || guessCountry());
   const [password, setPassword] = useState(''); const [fullName, setFullName] = useState('');
   const [dob, setDob] = useState(''); const [terms, setTerms] = useState(false);
   const [code, setCode] = useState(''); const [sentTo, setSentTo] = useState(resume || '');

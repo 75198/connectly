@@ -8,7 +8,7 @@ import { FollowButton } from '../components/Engagement';
 
 type N = { id: number; type: string; post_id: number | null; created_at: string; read_at: string | null; actor: { username: string; full_name: string; avatar_path: string | null }; post_snippet: string | null; space: { slug: string; name: string; kind: string } | null; live_stream_id?: number | null };
 const TEXT: Record<string, (n: N) => string> = {
-  friend_request: () => 'sent you a friend request', friend_accept: () => 'accepted your friend request', follow: () => 'started following you', follow_request: () => 'requested to follow you', follow_accept: () => 'accepted your follow request', mention: () => 'mentioned you',
+  tip: () => 'sent you a tip 🪙', report_reviewed: () => 'reviewed your report. Thanks for helping keep Connectly safe.', report_actioned: () => 'took action on something you reported. Thank you.', friend_request: () => 'sent you a friend request', friend_accept: () => 'accepted your friend request', follow: () => 'started following you', follow_request: () => 'requested to follow you', follow_accept: () => 'accepted your follow request', mention: () => 'mentioned you',
   live: () => 'is live now. Tap to watch.', like: (n) => `liked your post${n.post_snippet ? `: “${n.post_snippet}”` : ''}`, comment: (n) => `commented on your post${n.post_snippet ? `: “${n.post_snippet}”` : ''}`,
   reply: () => 'replied to a comment', page_follow: (n) => `followed your page ${n.space?.name || ''}`, group_join: (n) => `joined ${n.space?.name || 'your group'}`,
 };

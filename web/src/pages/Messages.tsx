@@ -7,13 +7,14 @@ import { useSession } from '../session';
 import { useT } from '../lib/i18n';
 import { askPermission } from '../lib/permission';
 import { Avatar, Icon, Sheet, Spinner } from '../components/ui';
-import { TranslateButton, VerifiedBadge } from '../components/Extras';
+import { RichText, TranslateButton, VerifiedBadge } from '../components/Extras';
+import { scamAsk } from '../lib/scam';
 import { GameCard, GamePicker } from '../components/Games';
 import { sfx } from '../lib/sounds';
 
-type Member = { id: number; username: string; full_name: string; avatar_path: string | null; verified?: boolean; last_read_id?: number; typing?: boolean };
+type Member = { active_at?: string | null; id: number; username: string; full_name: string; avatar_path: string | null; verified?: boolean; new_account?: boolean; last_read_id?: number; typing?: boolean };
 type Conv = { id: number; is_group: boolean; title: string; members: Member[]; last_message: { id: number; sender_id: number; kind: string; body: string; created_at: string } | null; unread: number; last_message_at: string; is_request?: boolean };
-type Msg = { expires_at?: string | null; filtered?: boolean; id: number; conversation_id: number; sender_id: number; kind: string; body: string; media_path: string | null; poster_path: string | null; media_hd: boolean; meta: any; created_at: string; deleted: boolean; reactions: Record<string, string> };
+type Msg = { edited_at?: string | null; expires_at?: string | null; filtered?: boolean; id: number; conversation_id: number; sender_id: number; kind: string; body: string; media_path: string | null; poster_path: string | null; media_hd: boolean; meta: any; created_at: string; deleted: boolean; reactions: Record<string, string> };
 export const THEMES: { k: string; name: string; bg: string; mine: string }[] = [
   { k: 'default', name: 'Classic', bg: 'var(--bg)', mine: 'var(--primary)' }, { k: 'ocean', name: 'Ocean', bg: 'linear-gradient(160deg,#0ea5e9 0%,#1e3a8a 100%)', mine: '#0284c7' },
   { k: 'sunset', name: 'Sunset', bg: 'linear-gradient(160deg,#fb923c 0%,#db2777 100%)', mine: '#e11d48' }, { k: 'forest', name: 'Forest', bg: 'linear-gradient(160deg,#4ade80 0%,#065f46 100%)', mine: '#047857' },
@@ -39,9 +40,9 @@ export function Inbox() {
     {!items ? <Spinner /> : !list.length ? <div className="card empty"><div className="bigemoji">💬</div><p>{t('noMessages')}</p><button className="btn primary" onClick={() => setCompose(true)}>{t('newMessage')}</button></div>
       : <div className="card list convlist">{list.map((c) => { const others = c.members.filter((m) => m.id !== me!.id); const typing = others.some((m) => m.typing);
         return <Link key={c.id} to={`/messages/${c.id}`} className={`row convrow ${c.unread ? 'unread' : ''}`}>
-          <span className="convav">{c.is_group && others.length > 1 ? <><Avatar user={others[0]} size={38} /><Avatar user={others[1]} size={38} /></> : <Avatar user={others[0] || me!} size={54} />}</span>
+          <span className="convav">{c.is_group && others.length > 1 ? <><Avatar user={others[0]} size={38} /><Avatar user={others[1]} size={38} /></> : <Avatar user={others[0] || me!} size={54} />}{!c.is_group && activeLabel(others[0]?.active_at) === 'Active now' && <span className="onlinedot" aria-label="Online" />}</span>
           <span className="grow"><b className="row nowrap">{convName(c, me!.id)} {!c.is_group && <VerifiedBadge on={others[0]?.verified} size={14} />}</b>
-            <small className={typing ? 'typingtxt' : 'meta'}>{typing ? t('typing') : preview(c.last_message, me!.id)}{c.last_message && !typing && ` · ${timeAgo(c.last_message.created_at)}`}</small></span>
+            <small className={typing ? 'typingtxt' : 'meta'}>{typing ? t('typing') : preview(c.last_message, me!.id)}{c.last_message && !typing && ` · ${timeAgo(c.last_message.created_at)}`}</small>{!c.is_group && !typing && activeLabel(others[0]?.active_at) && <small className="activetxt">{activeLabel(others[0]?.active_at)}</small>}</span>
           {c.unread > 0 && <span className="unreaddot" aria-label="Unread" />}</Link>; })}</div>}
     {compose && <NewChat onClose={() => setCompose(false)} />}
   </div>;
@@ -61,7 +62,7 @@ function NewChat({ onClose }: { onClose: () => void }) {
 }
 
 export function Chat() {
-  const { id } = useParams(); const cid = Number(id); const { me } = useSession(); const t = useT(); const nav = useNavigate(); const f = useFeatures();
+  const ffScam = useFeatures(); const { id } = useParams(); const cid = Number(id); const { me } = useSession(); const t = useT(); const nav = useNavigate(); const f = useFeatures();
   const [isReq, setIsReq] = useState(false);
   const [dis, setDis] = useState<number | null>(null); const [presence, setPresence] = useState<{ online?: boolean; last_seen?: string | null; hidden?: boolean } | null>(null); const [, tickNow] = useState(0);
   useEffect(() => { const i = setInterval(() => tickNow((x) => x + 1), 15000); return () => clearInterval(i); }, []);
@@ -87,6 +88,7 @@ export function Chat() {
   }, [cid]);
   const add = (m: Msg) => { setMsgs((x) => [...x.filter((y) => y.id !== m.id), m]); lastId.current = Math.max(lastId.current, m.id); setTimeout(() => end.current?.scrollIntoView({ behavior: 'smooth' }), 30); };
   const send = async (e?: FormEvent) => { e?.preventDefault(); const b = text.trim(); if (!b) return; setText(''); haptic();
+    if (editing) { const m = editing; setEditing(null); try { const r = await api<{ body: string; edited_at: string }>(`/messages/${m.id}`, { method: 'PATCH', json: { body: b } }); setMsgs((x) => x.map((y) => (y.id === m.id ? { ...y, ...r } : y))); } catch (x: any) { toast(x.message, 'err'); } return; }
     try { const fd = new FormData(); fd.append('body', b); sfx('sent'); add(await uploadForm<Msg>(`/conversations/${cid}/messages`, fd)); } catch (x: any) { setText(b); toast(x.message, 'err'); } };
   const sendFile = async (file: File) => { const fd = new FormData(); fd.append('file', file); fd.append('hd', hd ? '1' : '0'); setBusy(1);
     try { add(await uploadForm<Msg>(`/conversations/${cid}/messages`, fd, (p) => setBusy(Math.max(1, p)))); } catch (x: any) { toast(x.message, 'err'); } finally { setBusy(0); if (fileIn.current) fileIn.current.value = ''; } };
@@ -103,12 +105,15 @@ export function Chat() {
       const fd = new FormData(); fd.append('voice', '1'); fd.append('duration', String(Math.round(dur))); fd.append('file', blob, `voice.${blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm'}`);
       try { add(await uploadForm<Msg>(`/conversations/${cid}/messages`, fd)); } catch (x: any) { toast(x.message, 'err'); } }; r.stop(); setRec(null); setRecT(0); };
   const doReact = async (m: Msg, e: string) => { setReact(null); haptic(); setMsgs((x) => x.map((y) => (y.id === m.id ? { ...y, reactions: { ...y.reactions, [me!.id]: e } } : y))); api(`/messages/${m.id}/reaction`, { method: 'PUT', json: { emoji: e } }).catch((x) => toast(x.message, 'err')); };
+  const [editing, setEditing] = useState<Msg | null>(null);
+  const canEdit = (m: Msg) => !!f?.msg_controls && m.sender_id === me?.id && m.kind === 'text' && Date.now() - new Date(m.created_at).getTime() < 15 * 60000;
+  const hideForMe = async (m: Msg) => { setReact(null); try { await api(`/messages/${m.id}/hide`, { method: 'POST' }); setMsgs((x) => x.filter((y) => y.id !== m.id)); } catch (x: any) { toast(x.message, 'err'); } };
   const unsend = async (m: Msg) => { setReact(null); try { await api(`/messages/${m.id}`, { method: 'DELETE' }); setMsgs((x) => x.map((y) => (y.id === m.id ? { ...y, deleted: true, body: '', media_path: null } : y))); } catch (x: any) { toast(x.message, 'err'); } };
   const answerReq = async (action: 'accept' | 'delete' | 'block') => { if (action === 'block' && !confirm('Block this person? They won’t be able to message you.')) return; try { await api(`/conversations/${cid}/request`, { json: { action } }); if (action === 'accept') { setIsReq(false); toast('Request accepted'); } else { toast(action === 'block' ? 'Blocked' : 'Request deleted'); nav('/messages'); } } catch (x: any) { toast(x.message, 'err'); } };
   const call = (video: boolean) => nav(`/call/${cid}?video=${video ? 1 : 0}`);
   if (!conv || !me) return <div className="splash"><Spinner /></div>;
   if (!presence && !conv.is_group) { const o = conv.members.find((m: Member) => m.id !== me.id); if (o) { setPresence({ hidden: true }); api<any>(`/users/${o.username}/presence`).then(setPresence).catch(() => {}); } }
-  const theme = THEMES.find((x) => x.k === conv.theme) || THEMES[0]; const others: Member[] = conv.members.filter((m: Member) => m.id !== me.id);
+  const theme = THEMES.find((x) => x.k === conv.theme) || THEMES[0]; const ffs = ffScam; const others: Member[] = conv.members.filter((m: Member) => m.id !== me.id);
   const lastMine = [...msgs].reverse().find((m) => m.sender_id === me.id);
   const seenBy = lastMine ? others.filter((o) => (reads[o.id] || 0) >= lastMine.id) : [];
   const bg = conv.wallpaper_path ? `center/cover url(${conv.wallpaper_path})` : theme.bg;
@@ -119,6 +124,7 @@ export function Chat() {
       {f?.calls && <><button className="btn icon ghost" aria-label="Voice call" onClick={() => call(false)}>📞</button><button className="btn icon ghost" aria-label="Video call" onClick={() => call(true)}>🎥</button></>}
       <button className="btn icon ghost" aria-label="Chat theme" onClick={() => setSheet('theme')}>🎨</button></header>
     <div className="chatscroll">
+      {ffs?.anti_scam && others.some((o) => o.new_account && !o.verified) && msgs.some((m) => m.sender_id !== me.id && m.body && scamAsk(m.body)) && <div className="scambanner" role="alert"><b>⚠️ Possible scam</b><span>This is a new account asking about money, codes, passwords, crypto or investments. Never send money or share codes or bank details with people you haven’t met. Connectly will never ask for your login code.</span></div>}
       {!msgs.length && <p className="meta center chatempty">{t('noMessages')}</p>}
       {msgs.filter((m) => !m.expires_at || new Date(m.expires_at).getTime() > Date.now()).map((m, i) => { const mine = m.sender_id === me.id; const sender = conv.members.find((x: Member) => x.id === m.sender_id); const prev = msgs[i - 1]; const gap = !prev || new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() > 15 * 60e3;
         const rs = Object.values(m.reactions || {});
@@ -127,6 +133,7 @@ export function Chat() {
             <div className="msgwrap" onContextMenu={(e) => { e.preventDefault(); if (!m.deleted) setReact(m); }} onDoubleClick={() => !m.deleted && doReact(m, '❤️')}>
               {!mine && conv.is_group && (!prev || prev.sender_id !== m.sender_id) && <small className="msgname">{sender?.full_name.split(' ')[0]}</small>}
               <MessageBody m={m} mine={mine} cid={cid} onMenu={() => setReact(m)} />
+              {m.edited_at && !m.deleted && <small className="editedtag">Edited</small>}
               {rs.length > 0 && <span className="msgreacts">{[...new Set(rs)].slice(0, 3).map((e) => e.startsWith(':') ? '✨' : e)}{rs.length > 1 && <small>{rs.length}</small>}</span>}
             </div></div></div>; })}
       {lastMine && seenBy.length > 0 && <div className="seen">{conv.is_group ? seenBy.map((s) => <Avatar key={s.id} user={s} size={14} />) : t('seen')}</div>}
@@ -137,6 +144,7 @@ export function Chat() {
     {busy > 0 && <div className="chatupload"><div className="progress"><div style={{ width: `${busy}%` }} /></div><small className="meta">{hd ? 'Sending in HD…' : 'Sending…'}</small></div>}
     {rec ? <div className="composerbar recbar"><button className="btn icon ghost" aria-label="Cancel" onClick={() => stopRec(false)}><Icon name="trash" /></button><span className="recdot" /><span className="grow">{Math.floor(recT / 60)}:{String(recT % 60).padStart(2, '0')}</span><button className="btn primary" onClick={() => stopRec(true)}>{t('send')}</button></div>
       : <form className="composerbar" onSubmit={send}>
+        {editing && <div className="editbar"><span>Editing message</span><button type="button" className="btn ghost sm" onClick={() => { setEditing(null); setText(''); }}>Cancel</button></div>}
         <button type="button" className="btn icon ghost" aria-label="Photo or video" onClick={() => fileIn.current?.click()}><Icon name="image" /></button>
         <button type="button" className={`hdtoggle ${hd ? 'on' : ''}`} aria-pressed={hd} title={hd ? 'HD: original quality' : 'Standard quality'} onClick={() => { setHd(!hd); toast(hd ? 'Standard quality' : 'HD on: photos and videos send at original quality'); }}>HD</button>
         <input ref={fileIn} type="file" hidden accept="image/*,video/mp4,video/quicktime,video/webm,video/3gpp" onChange={(e) => e.target.files?.[0] && sendFile(e.target.files[0])} />
@@ -148,7 +156,9 @@ export function Chat() {
     {react && <div className="sheetwrap" onClick={() => setReact(null)}><div className="reactpop" onClick={(e) => e.stopPropagation()}>
       <div className="row reactrow">{QUICK.map((e) => <button key={e} onClick={() => doReact(react, e)}>{e}</button>)}<EmojiMore onPick={(e) => doReact(react, e)} /></div>
       <div className="list">{react.body && <button className="optrow" onClick={() => { navigator.clipboard?.writeText(react.body); setReact(null); toast('Copied'); }}>Copy</button>}
-        {react.sender_id === me.id && <button className="optrow danger" onClick={() => unsend(react)}>Unsend</button>}</div></div></div>}
+        {canEdit(react) && <button className="optrow" onClick={() => { setEditing(react); setText(react.body); setReact(null); }}>Edit</button>}
+        {f?.msg_controls && <button className="optrow danger" onClick={() => hideForMe(react)}>Delete for me</button>}
+        {react.sender_id === me.id && <button className="optrow danger" onClick={() => unsend(react)}>{f?.msg_controls ? 'Unsend for everyone' : 'Unsend'}</button>}</div></div></div>}
     {sheet === 'theme' && <ThemeSheet conv={conv} onClose={() => setSheet('')} onSaved={loadConv} />}
     {sheet === 'stickers' && <StickerSheet onPick={sticker} onClose={() => setSheet('')} />}
     {sheet === 'games' && <GamePicker cid={cid} onClose={() => setSheet('')} onStarted={(m) => { setSheet(''); add(m); }} />}
@@ -178,7 +188,7 @@ function MessageBody({ m, mine, cid, onMenu }: { m: Msg; mine: boolean; cid: num
     {m.kind === 'image' ? <img src={m.media_path!} alt="Photo" loading="lazy" onClick={() => setFull(true)} /> : <video src={m.media_path!} poster={m.poster_path || undefined} controls playsInline preload="metadata" />}
     {m.media_hd && <span className="hdbadge">HD</span>}{m.body && <div className="bubble">{m.body}</div>}
     {full && <div className="lightbox" onClick={() => setFull(false)}><img src={m.media_path!} alt="Photo" />{m.media_hd && <span className="hdbadge">HD</span>}</div>}</div>;
-  return <div className="bubble"><span>{tr ?? m.body}</span>{!mine && <div><TranslateButton text={m.body} onText={setTr} /></div>}</div>;
+  return <div className="bubble"><span><RichText text={tr ?? m.body} tags={false} /></span>{!mine && <div><TranslateButton text={m.body} onText={setTr} /></div>}</div>;
 }
 
 function ThemeSheet({ conv, onClose, onSaved }: { conv: any; onClose: () => void; onSaved: () => void }) {
@@ -199,3 +209,5 @@ export function StickerSheet({ onPick, onClose }: { onPick: (k: string) => void;
   useEffect(() => { api<{ stickers: any[] }>('/stickers').then((r) => setS(r.stickers)).catch(() => {}); }, []);
   return <Sheet title="Stickers" onClose={onClose}><div className="stickergrid">{s.map((x) => <button key={x.key} onClick={() => onPick(x.key)} aria-label={x.key}><img src={x.url} alt="" /></button>)}</div></Sheet>;
 }
+
+function activeLabel(at?: string | null) { if (!at) return ''; const m = Math.floor((Date.now() - new Date(at).getTime()) / 60000); if (m < 3) return 'Active now'; if (m < 60) return `Active ${m}m ago`; if (m < 1440) return `Active ${Math.floor(m / 60)}h ago`; return ''; }

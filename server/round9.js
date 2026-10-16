@@ -48,13 +48,13 @@ export function zip(files) {
 
 export function registerRound9(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost }) {
   // ---- privacy settings ----
-  const PRIV = 'is_private, dm_privacy, who_can_comment, who_can_tag, who_can_mention, hide_presence, hide_follow_lists, hidden_words, hidden_words_on, discover_by_email, discover_by_phone, allow_downloads, (birth_date IS NOT NULL AND birth_date > (now() - interval \'18 years\')::date) AS is_teen';
+  const PRIV = 'is_private, dm_privacy, who_can_comment, who_can_tag, who_can_mention, hide_presence, hide_follow_lists, hidden_words, hidden_words_on, discover_by_email, discover_by_phone, allow_downloads, read_receipts, (birth_date IS NOT NULL AND birth_date > (now() - interval \'18 years\')::date) AS is_teen';
   api.get('/me/privacy', requireAuth, async (req, res) => { const { rows: [u] } = await q(`SELECT ${PRIV}, (SELECT count(*)::int FROM follow_requests WHERE target_id = $1) AS pending_requests FROM users WHERE id = $1`, [req.user.id]); res.json(u); });
   api.patch('/me/privacy', requireAuth, async (req, res) => {
     const d = z.object({ is_private: z.boolean().optional(), dm_privacy: z.enum(['everyone', 'following', 'off']).optional(), who_can_comment: WHO.optional(), who_can_tag: WHO.optional(), who_can_mention: WHO.optional(),
       hide_presence: z.boolean().optional(), hide_follow_lists: z.boolean().optional(), hidden_words: z.array(z.string().trim().min(1).max(40)).max(200).optional(), hidden_words_on: z.boolean().optional(),
-      discover_by_email: z.boolean().optional(), discover_by_phone: z.boolean().optional(), allow_downloads: z.boolean().optional() }).strict().parse(req.body);
-    const gate = { allow_downloads: 'downloads', is_private: 'privateAccounts', who_can_comment: 'whoCan', who_can_tag: 'whoCan', who_can_mention: 'whoCan', hide_presence: 'hidePresence', hide_follow_lists: 'hideLists', hidden_words: 'hiddenWords', hidden_words_on: 'hiddenWords', discover_by_email: 'discoverability', discover_by_phone: 'discoverability' };
+      discover_by_email: z.boolean().optional(), discover_by_phone: z.boolean().optional(), allow_downloads: z.boolean().optional(), read_receipts: z.boolean().optional() }).strict().parse(req.body);
+    const gate = { read_receipts: 'msgControls', allow_downloads: 'downloads', is_private: 'privateAccounts', who_can_comment: 'whoCan', who_can_tag: 'whoCan', who_can_mention: 'whoCan', hide_presence: 'hidePresence', hide_follow_lists: 'hideLists', hidden_words: 'hiddenWords', hidden_words_on: 'hiddenWords', discover_by_email: 'discoverability', discover_by_phone: 'discoverability' };
     const sets = []; const vals = [req.user.id];
     for (const [k, v] of Object.entries(d)) { if (gate[k] && !F[gate[k]]) continue; vals.push(k === 'hidden_words' ? [...new Set(v.map((w) => w.toLowerCase()))] : v); sets.push(`${k} = $${vals.length}`); }
     if (sets.length) await q(`UPDATE users SET ${sets.join(', ')} WHERE id = $1`, vals);

@@ -41,7 +41,15 @@ export function ComposerForm({ onPosted, spaceId, initialText = '' }: { onPosted
   const [feeling, setFeeling] = useState(''); const [place, setPlace] = useState('');
   const [panel, setPanel] = useState<'' | 'feeling' | 'place' | 'audience' | 'ai' | 'schedule'>('');
   const [aiOn, setAiOn] = useState(false); const [aiPrompt, setAiPrompt] = useState(''); const [aiBusy, setAiBusy] = useState(false);
-  useEffect(() => { getFeatures().then((f) => setAiOn(!!f.ai_support)); }, []);
+  const [creatorOn, setCreatorOn] = useState(false); const [tags, setTags] = useState<string[]>([]); const [ideas, setIdeas] = useState<string[]>([]); const [cBusy, setCBusy] = useState('');
+  useEffect(() => { getFeatures().then((f) => { setAiOn(!!f.ai_support || !!f.ai_creator); setCreatorOn(!!f.ai_creator); }); }, []);
+  const creator = async (action: 'caption' | 'improve' | 'hashtags' | 'ideas') => {
+    if ((action === 'improve' || action === 'hashtags') && !body.trim()) { toast('Write something first, then try again.'); return; }
+    setCBusy(action);
+    try { const r = await api<{ text?: string; hashtags?: string[]; ideas?: string[] }>('/ai/creator', { json: { action, text: body, topic: aiPrompt, lang: document.documentElement.lang || 'en' } });
+      if (r.text) { setBody(r.text); toast(action === 'improve' ? 'Caption improved' : 'Caption written. Edit it as you like.'); }
+      if (r.hashtags) setTags(r.hashtags); if (r.ideas) setIdeas(r.ideas);
+    } catch (e: any) { toast(e.message, 'err'); } finally { setCBusy(''); } };
   const aiWrite = async () => { const prompt = aiPrompt.trim() || 'Improve my draft'; setAiBusy(true);
     try { const r = await api<{ text: string }>('/ai/write', { json: { prompt, ...(body.trim() ? { draft: body } : {}) } }); setBody(r.text); setPanel(''); setAiPrompt(''); toast('Connectly AI wrote a draft. Edit it as you like.'); }
     catch (e: any) { toast(e.message, 'err'); } finally { setAiBusy(false); } };
@@ -98,6 +106,15 @@ export function ComposerForm({ onPosted, spaceId, initialText = '' }: { onPosted
     {panel === 'ai' && <div className="optpanel aiwrite"><span className="aiorb sm">✦</span>
       <input autoFocus value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} maxLength={500} placeholder={body.trim() ? 'How should I improve it?' : 'What should I write?'} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); aiWrite(); } }} aria-label="Write with Connectly AI" />
       <button type="button" className="btn primary" disabled={aiBusy} onClick={aiWrite}>{aiBusy ? 'Writing…' : 'Write'}</button></div>}
+    {panel === 'ai' && creatorOn && <div className="creatorrow">
+      <button type="button" className="chip" disabled={!!cBusy} onClick={() => creator('caption')}>{cBusy === 'caption' ? '…' : '✍️'} Caption</button>
+      <button type="button" className="chip" disabled={!!cBusy} onClick={() => creator('improve')}>{cBusy === 'improve' ? '…' : '✨'} Improve</button>
+      <button type="button" className="chip" disabled={!!cBusy} onClick={() => creator('hashtags')}>{cBusy === 'hashtags' ? '…' : '#'} Hashtags</button>
+      <button type="button" className="chip" disabled={!!cBusy} onClick={() => creator('ideas')}>{cBusy === 'ideas' ? '…' : '💡'} Ideas</button>
+      {file && !isVideo && <button type="button" className={`chip ${enhance ? 'on' : ''}`} onClick={() => { setEnhance(!enhance); toast(enhance ? 'Photo enhance off' : 'Photo enhanced: sharper, richer colour'); }}>🪄 {enhance ? 'Enhanced' : 'Enhance photo'}</button>}
+      {tags.length > 0 && <div className="creatorout">{tags.map((t) => <button type="button" key={t} className="chip" onClick={() => { setBody((b) => (b.includes(t) ? b : `${b.trimEnd()} ${t}`.trim())); setTags((x) => x.filter((y) => y !== t)); }}>{t}</button>)}</div>}
+      {ideas.length > 0 && <div className="creatorout col">{ideas.map((i) => <button type="button" key={i} className="optrow" onClick={() => { setBody(i); setIdeas([]); }}>💡 {i}</button>)}</div>}
+    </div>}
     {panel === 'feeling' && <div className="optpanel feelgrid">{FEELINGS.map((f) => <button type="button" key={f.k} className={`chip ${feeling === f.k ? 'on' : ''}`} onClick={() => { setFeeling(feeling === f.k ? '' : f.k); setPanel(''); }}>{f.e} {f.k}</button>)}</div>}
     {panel === 'place' && <div className="optpanel"><label>Where are you?<input value={place} onChange={(e) => setPlace(e.target.value)} maxLength={120} autoFocus autoComplete="off" /></label></div>}
     {poll && <div className="optpanel polledit"><input value={pollQ} onChange={(e) => setPollQ(e.target.value)} maxLength={300} placeholder="Ask a question" aria-label="Poll question" />

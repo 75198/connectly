@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, toast } from '../api';
 import { loadRegion, regionName, currencyName, type Region } from '../lib/region';
 const COUNTRIES = ['NG', 'GH', 'KE', 'ZA', 'EG', 'MA', 'TZ', 'UG', 'RW', 'ET', 'CM', 'SN', 'CI', 'US', 'CA', 'MX', 'BR', 'GB', 'IE', 'FR', 'DE', 'ES', 'IT', 'NL', 'PT', 'CH', 'SE', 'PL', 'TR', 'AE', 'SA', 'IN', 'PK', 'BD', 'CN', 'JP', 'KR', 'SG', 'ID', 'PH', 'AU', 'NZ'];
-const CURRENCIES = ['NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'XOF', 'XAF', 'USD', 'CAD', 'GBP', 'EUR', 'CHF', 'AED', 'SAR', 'INR', 'PKR', 'CNY', 'JPY', 'AUD', 'BRL', 'MXN'];
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'BRL', 'MXN', 'NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'XOF', 'XAF', 'CHF', 'AED', 'SAR', 'INR', 'PKR'];
 const SRC: Record<string, string> = { manual: 'Chosen by you', network: 'Detected privately on our servers', timezone: 'From your device time zone', language: 'From your device language', default: 'Not detected' };
 
 export function RegionSection() {

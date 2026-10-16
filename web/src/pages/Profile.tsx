@@ -11,23 +11,28 @@ import { TierBadge } from './Plans';
 import { PostCard } from '../components/PostCard';
 import { VerifiedBadge } from '../components/Extras';
 import { sfx } from '../lib/sounds';
+import { TipSheet } from '../components/Tips';
+import { ReportSheet } from '../components/Report';
 import type { Post } from '../api';
 
 const RELATIONSHIP = ['', 'Single', 'In a relationship', 'Engaged', 'Married', 'In a civil union', 'Separated', 'Divorced', 'Widowed', "It's complicated", 'Prefer not to say'];
 
 function FriendButtons({ u, onChange }: { u: User; onChange: (p: Partial<User>) => void }) {
-  const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [menu, setMenu] = useState(false); const nav = useNavigate();
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [menu, setMenu] = useState(false); const nav = useNavigate(); const ff = useFeatures(); const [tip, setTip] = useState(false); const [reporting, setReporting] = useState(false);
   const call = async (path: string, method: string, patch?: (r: any) => Partial<User>) => { setBusy(true); setErr(''); try { const r = await api(path, { method }); if (patch) onChange(patch(r)); if (path.endsWith('/follow') && method === 'PUT') sfx('follow'); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
   const n = encodeURIComponent(u.username);
   return <div className="stack">
     <div className="pf-actions">
       <button className={`btn ${u.following ? 'pf-secondary' : 'pf-primary'}`} disabled={busy} aria-pressed={!!u.following} onClick={() => call(`/users/${n}/follow`, u.following || (u as any).requested ? 'DELETE' : 'PUT', (r) => ({ following: r.following, requested: !!r.requested, follower_count: r.follower_count ?? (u.follower_count || 0) + (r.following ? 1 : -1) } as any))}>{u.following ? '✓ Following' : (u as any).requested ? 'Requested' : u.follows_me ? 'Follow back' : 'Follow'}</button>
       {(u as any).can_message && <button className="btn pf-secondary" disabled={busy} onClick={async () => { setBusy(true); try { const r = await api<{ id: number }>('/conversations', { json: { usernames: [u.username] } }); nav(`/messages/${r.id}`); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } }}><Icon name="chat" /> Message</button>}
+      {ff?.tips && <button className="btn icon pf-more" aria-label={`Tip ${u.full_name}`} onClick={() => setTip(true)}>🪙</button>}
       <button className="btn icon pf-more" aria-label="More options" onClick={() => setMenu(true)}><Icon name="more" /></button>
     </div>
     {err && <p className="error">{err}</p>}
+    {reporting && <ReportSheet target={{ target_type: 'user', username: u.username }} onClose={() => setReporting(false)} />}
+    {tip && <TipSheet to={u.username} name={u.full_name} onClose={() => setTip(false)} />}
     {menu && <Sheet title={u.full_name} onClose={() => setMenu(false)}>
-      <div className="list"><RestrictMute username={n} name={u.full_name.split(' ')[0]} /><button className="danger" onClick={async () => { if (!confirm(`Block ${u.full_name}? You won’t see each other’s profiles or posts, and you’ll be unfriended.`)) return; await api(`/users/${n}/block`, { method: 'PUT' }); nav('/'); }}><Icon name="lock" /> Block {u.full_name.split(' ')[0]}</button><button className="danger" onClick={async () => { const reason = prompt(`Why are you reporting ${u.full_name}? (fake account, spam, harassment…)`); if (!reason || !reason.trim()) return; try { await api('/reports', { json: { target_type: 'user', username: u.username, reason: reason.trim() } }); alert('Thanks. Our moderators will review this account.'); } catch (e: any) { alert(e.message); } }}><Icon name="flag" /> Report {u.full_name.split(' ')[0]}</button></div>
+      <div className="list"><button onClick={() => { setMenu(false); setReporting(true); }}>🚩 Report account</button><RestrictMute username={n} name={u.full_name.split(' ')[0]} /><button className="danger" onClick={async () => { if (!confirm(`Block ${u.full_name}? You won’t see each other’s profiles or posts, and you’ll be unfriended.`)) return; await api(`/users/${n}/block`, { method: 'PUT' }); nav('/'); }}><Icon name="lock" /> Block {u.full_name.split(' ')[0]}</button><button className="danger" onClick={async () => { const reason = prompt(`Why are you reporting ${u.full_name}? (fake account, spam, harassment…)`); if (!reason || !reason.trim()) return; try { await api('/reports', { json: { target_type: 'user', username: u.username, reason: reason.trim() } }); alert('Thanks. Our moderators will review this account.'); } catch (e: any) { alert(e.message); } }}><Icon name="flag" /> Report {u.full_name.split(' ')[0]}</button></div>
     </Sheet>}
   </div>;
 }

@@ -141,10 +141,12 @@ export function registerRound7(api, { requireAuth, requireVerified, requireAdmin
 
   // ===== preferences: language + hide like counts =====
   api.get('/me/prefs', requireAuth, async (req, res) => {
-    const { rows: [u] } = await q('SELECT locale, hide_like_counts, text_scale FROM users WHERE id = $1', [req.user.id]); res.json(u);
+    const { rows: [u] } = await q('SELECT locale, hide_like_counts, text_scale, auto_translate, lite_mode FROM users WHERE id = $1', [req.user.id]); res.json(u);
   });
   api.patch('/me/prefs', requireAuth, async (req, res) => {
-    const d = z.object({ locale: z.enum(LOCALES).nullable().optional(), hide_like_counts: z.boolean().optional(), text_scale: z.number().min(0.8).max(1.5).nullable().optional() }).strict().parse(req.body);
+    const d = z.object({ locale: z.enum(LOCALES).nullable().optional(), hide_like_counts: z.boolean().optional(), text_scale: z.number().min(0.8).max(1.5).nullable().optional(), auto_translate: z.boolean().optional(), lite_mode: z.enum(['auto', 'on', 'off']).optional() }).strict().parse(req.body);
+    if (d.auto_translate !== undefined) await q('UPDATE users SET auto_translate = $2 WHERE id = $1', [req.user.id, d.auto_translate]);
+    if (d.lite_mode !== undefined) await q('UPDATE users SET lite_mode = $2 WHERE id = $1', [req.user.id, d.lite_mode]);
     if (d.text_scale !== undefined) await q('UPDATE users SET text_scale = $2 WHERE id = $1', [req.user.id, d.text_scale]);
     if (d.locale !== undefined) await q('UPDATE users SET locale = $2 WHERE id = $1', [req.user.id, d.locale]);
     if (d.hide_like_counts !== undefined && config.features.hideLikes) await q('UPDATE users SET hide_like_counts = $2 WHERE id = $1', [req.user.id, d.hide_like_counts]);
@@ -160,18 +162,23 @@ export function registerRound7(api, { requireAuth, requireVerified, requireAdmin
   const translateHits = new Map();
   api.post('/translate', requireAuth, flag('translate'), async (req, res) => {
     const d = z.object({ text: z.string().trim().min(1).max(4000), target: z.enum(LOCALES) }).strict().parse(req.body);
+    const hash = (await import('node:crypto')).createHash('sha256').update(d.text).digest('hex');
+    const { rows: [hit] } = await q('SELECT text FROM translations WHERE hash = $1 AND target = $2', [hash, d.target]);
+    if (hit) return res.json({ text: hit.text === '<<SAME>>' ? d.text : hit.text, target: d.target, same: hit.text === '<<SAME>>', cached: true });
     const now = Date.now(), k = req.user.id, arr = (translateHits.get(k) || []).filter((t) => now - t < 60000);
-    if (arr.length >= 30) return res.status(429).json({ error: 'Translating a lot right now. Try again in a moment.' });
+    if (arr.length >= 60) return res.status(429).json({ error: 'Translating a lot right now. Try again in a moment.' });
     arr.push(now); translateHits.set(k, arr);
     if (!config.groqApiKey) return res.status(503).json({ error: 'Translation isn’t available right now' });
     try {
       const r = await fetch(`${config.groqBaseUrl}/chat/completions`, { method: 'POST', signal: AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${config.groqApiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: config.groqModel, temperature: 0.2, max_tokens: 1500, stream: false, ...(config.groqModel.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low', include_reasoning: false } : {}),
-          messages: [{ role: 'system', content: `You are a translator. Translate the user's text into ${LOCALE_NAMES[d.target]}. Keep emoji, @mentions, #hashtags and links unchanged. Reply with the translation only, no notes.` }, { role: 'user', content: d.text }] }) });
+          messages: [{ role: 'system', content: `You are a translator. Translate the user's text into ${LOCALE_NAMES[d.target]}. Keep emoji, @mentions, #hashtags and links unchanged. Reply with the translation only, no notes. If the text is already in ${LOCALE_NAMES[d.target]} (or has no words to translate), reply exactly <<SAME>>.` }, { role: 'user', content: d.text }] }) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json(); const t = j.choices?.[0]?.message?.content?.trim();
       if (!t) throw new Error('empty');
-      res.json({ text: t, target: d.target });
+      const same = t.includes('<<SAME>>');
+      await q('INSERT INTO translations (hash, target, text) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [hash, d.target, same ? '<<SAME>>' : t]);
+      res.json({ text: same ? d.text : t, target: d.target, same });
     } catch { res.status(502).json({ error: 'Translation isn’t available right now. Try again later.' }); }
   });
 

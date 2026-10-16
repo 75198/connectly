@@ -1,3 +1,5 @@
+import { initLite } from './lib/lite';
+import { Earnings } from './components/Tips';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { SessionProvider, useSession } from './session';
@@ -107,7 +109,7 @@ function Router() {
     <Route path="/me" element={<Hub />} /><Route path="/me/:tab" element={<MyPosts />} /><Route path="/notifications" element={<Notifications />} /><Route path="/friends" element={<Friends />} /><Route path="/u/:username/:list" element={<Friends />} />
     <Route path="/post/:id" element={<PostPage />} /><Route path="/create/:kind" element={<CreateSpace />} /><Route path="/s/:slug" element={<SpaceView />} />
     <Route path="/messages" element={<Inbox />} /><Route path="/tag/:tag" element={<TagPage />} /><Route path="/sound/:id" element={<SoundPage />} /><Route path="/challenges" element={<Challenges />} />
-    <Route path="/events" element={<Events />} /><Route path="/events/new" element={<NewEvent />} /><Route path="/events/:id" element={<EventPage />} /><Route path="/memories" element={<Memories />} /><Route path="/me/streak" element={<StreakPage />} /><Route path="/me/coins" element={<Wallet />} /><Route path="/me/insights" element={<Insights />} />
+    <Route path="/events" element={<Events />} /><Route path="/events/new" element={<NewEvent />} /><Route path="/events/:id" element={<EventPage />} /><Route path="/memories" element={<Memories />} /><Route path="/me/streak" element={<StreakPage />} /><Route path="/me/coins" element={<Wallet />} /><Route path="/me/earnings" element={<Earnings />} /><Route path="/me/insights" element={<Insights />} />
     <Route path="/market" element={<Market />} /><Route path="/market/new" element={<NewListing />} /><Route path="/market/:id" element={<ListingView />} />
     {me.roles?.includes('admin') && <Route path="/admin" element={<Admin />} />}
     {['/login', '/signup', '/register', '/forgot', '/find', '/welcome'].map((p) => <Route key={p} path={p} element={<Navigate to="/" replace />} />)}
@@ -119,7 +121,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   const { me, theme, toggleTheme } = useSession();
   const unread = me!.unread_notifications || 0; const t = useT();
   const [dm, setDm] = useState(false); const [dmUnread, setDmUnread] = useState(0);
-  useEffect(() => { getFeatures().then((f) => setDm(!!f.messages)); }, []);
+  useEffect(() => { getFeatures().then((f) => { setDm(!!f.messages); initLite(!!f.lite_mode, me?.lite_mode); }); }, []);
   useEffect(() => { if (!dm) return; let prev = -1; const tick = () => api<{ unread: number }>('/conversations/unread').then((r) => { if (prev >= 0 && r.unread > prev) sfx('received'); prev = r.unread; setDmUnread(r.unread); }).catch(() => {}); tick(); const i = setInterval(tick, 15000); return () => clearInterval(i); }, [dm]);
   const prevN = useRef(unread); useEffect(() => { if (unread > prevN.current) sfx('notify'); prevN.current = unread; }, [unread]);
   const Dm = ({ label }: { label?: boolean }) => dm ? <NavLink to="/messages" className={label ? '' : 'btn icon ghost bellbtn'} aria-label={t('messages')}><Icon name="chat" />{label && <span>{t('messages')}</span>}{dmUnread > 0 && <b className="badge">{dmUnread > 99 ? '99+' : dmUnread}</b>}</NavLink> : null;

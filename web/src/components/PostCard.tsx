@@ -8,6 +8,9 @@ import { DuetView, InsightsSheet, MusicChip, PollView, RichText, TranslateButton
 import { useFeatures } from '../api';
 import { sfx } from '../lib/sounds';
 import { canOfferSave, saveToGallery } from '../lib/save';
+import { liteSrc } from '../lib/lite';
+import { TipSheet } from './Tips';
+import { ReportSheet } from './Report';
 
 type Mode = 'feed' | 'draft' | 'deleted';
 export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Post; onChange: (p: Post) => void; onDelete: (id: number) => void; mode?: Mode }) {
@@ -15,7 +18,7 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
   const mine = post.is_mine;
   const ffx = useFeatures();
   const [colls, setColls] = useState(false);
-  const [viewer, setViewer] = useState(false); const [menu, setMenu] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const [share, setShare] = useState(false); const [eng, setEng] = useState<EngTab | null>(null);
+  const [reporting, setReporting] = useState(false); const [tip, setTip] = useState(false); const [viewer, setViewer] = useState(false); const [menu, setMenu] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const [share, setShare] = useState(false); const [eng, setEng] = useState<EngTab | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.body); const [dvis, setDvis] = useState(post.visibility);
   const [showComments, setShowComments] = useState(false);
@@ -42,11 +45,7 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
     try { onChange(await api<Post>(`/posts/${post.id}`, { method: 'PATCH', json: { body: draft, visibility: dvis } })); setEditing(false); toast('Post updated'); }
     catch (e: any) { setErr(e.message); }
   }
-  async function report() {
-    const reason = prompt('Why are you reporting this post? (spam, harassment, hate speech, scam…)');
-    if (!reason || !reason.trim()) return;
-    try { await api('/reports', { json: { target_type: 'post', post_id: post.id, reason: reason.trim() } }); toast('Thanks. Our moderators will review this post.'); } catch (e: any) { setErr(e.message); }
-  }
+  function report() { setReporting(true); }
   const act = async (fn: () => Promise<unknown>, msg: string, remove = true) => { setMenu(false); setConfirmDel(false); try { await fn(); toast(msg); haptic(); if (remove) onDelete(post.id); } catch (e: any) { setErr(e.message); } };
   const toDraft = () => act(() => api(`/posts/${post.id}/draft`, { method: 'POST' }), 'Moved to Drafts');
   const del = () => act(() => api(`/posts/${post.id}`, { method: 'DELETE' }), 'Moved to Recently deleted. You can restore it for 30 days.');
@@ -74,6 +73,7 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
             {mine && f?.creator_tools && <button role="menuitem" onClick={() => { setMenu(false); setIns(true); }}>📊 View insights</button>}
             {mine && f?.hide_likes && <button role="menuitem" onClick={toggleHide}>🙈 {post.hide_like_count ? 'Show like count' : 'Hide like count'}</button>}
             {mine && post.kind !== 'reel' && <button role="menuitem" onClick={toDraft}><Icon name="image" /> Save as draft</button>}
+            {ffx?.tips && !mine && me && post.visibility === 'public' && !post.author.space && <button role="menuitem" onClick={() => { setMenu(false); setTip(true); }}>🪙 Send a tip</button>}
             {ffx?.downloads && canOfferSave(post) && <button role="menuitem" onClick={() => { setMenu(false); saveToGallery(post.id); }}>⬇️ Save to gallery</button>}
             {mine && ffx?.downloads && post.visibility === 'public' && <button role="menuitem" onClick={toggleDl}>{post.allow_downloads === false ? '✅ Allow downloads' : '🚫 Turn off downloads'}</button>}
             <button role="menuitem" onClick={toggleSave}><Icon name="bookmark" /> {post.saved_by_me ? 'Unsave post' : 'Save post'}</button>
@@ -91,7 +91,9 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
       ) : post.body && <><p className="body"><RichText text={tr ?? post.body} /></p>{!mine && <TranslateButton text={post.body} onText={setTr} />}</>}
       {post.poll && <PollView post={post} onChange={onChange} />}
       {post.music && <MusicChip track={post.music} start={post.music_start} />}
-      {post.image_path && post.kind !== 'reel' && <img className="postimg" src={post.image_path} alt="" loading="lazy" decoding="async" onClick={() => setViewer(true)} />}
+      {post.image_path && post.kind !== 'reel' && <img className="postimg" src={liteSrc(post.image_path)} alt="" loading="lazy" decoding="async" onClick={() => setViewer(true)} />}
+      {reporting && <ReportSheet target={{ target_type: 'post', post_id: post.id }} onClose={() => setReporting(false)} />}
+      {tip && <TipSheet postId={post.id} name={post.author.full_name} onClose={() => setTip(false)} />}
       {viewer && post.image_path && <div className="mediaviewer" role="dialog" aria-label="Photo" onClick={() => setViewer(false)}><img src={post.image_path} alt="" />
         <div className="mvbar" onClick={(e) => e.stopPropagation()}><button className="btn icon reelbtn" aria-label="Close" onClick={() => setViewer(false)}><Icon name="x" /></button>
           {ffx?.downloads && canOfferSave(post) && <button className="btn reelbtn" onClick={() => saveToGallery(post.id)}>⬇️ Save</button>}</div></div>}
@@ -165,7 +167,7 @@ export function Comments({ post, onCount }: { post: Post; onCount: (n: number) =
   const one = (c: Comment, isReply = false) => (
     <div key={c.id} className={`comment ${isReply ? 'reply' : ''}`}>
       <Avatar user={c.author} size={30} />
-      <div className="grow"><div className="bubble"><UserLink user={c.author} /> <VerifiedBadge on={c.author.verified} size={13} /><p><RichText text={c.body} /></p></div>
+      <div className="grow"><div className="bubble"><UserLink user={c.author} /> <VerifiedBadge on={c.author.verified} size={13} /><CommentText body={c.body} /></div>
         <div className="meta row small"><time title={new Date(c.created_at).toLocaleString()}>{timeAgo(c.created_at)}</time>
           <button className="linkish" onClick={() => setReplyTo(c)}>Reply</button>
           {(c.is_mine || post.is_mine) && <button className="linkish" onClick={() => remove(c)}>Delete</button>}</div>
@@ -195,4 +197,9 @@ export function CollectionSheet({ postId, onClose }: { postId: number; onClose: 
   const create = async () => { if (!name.trim()) return; const c = await api<{ id: number; name: string }>('/collections', { json: { name } }); add(c.id, c.name); };
   return <Sheet title="Save to collection" onClose={onClose}><div className="list">{items?.map((c) => <button key={c.id} onClick={() => add(c.id, c.name)}>📁 <span className="grow">{c.name}</span></button>)}</div>
     <div className="row"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="New collection name" aria-label="New collection name" maxLength={60} /><button className="btn primary" onClick={create}>Create</button></div></Sheet>;
+}
+
+function CommentText({ body }: { body: string }) {
+  const [tr, setTr] = useState<string | null>(null);
+  return <><p><RichText text={tr ?? body} /></p><TranslateButton text={body} onText={setTr} /></>;
 }

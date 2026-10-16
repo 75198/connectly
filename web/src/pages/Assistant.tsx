@@ -11,7 +11,7 @@ import { speak, stopSpeaking, canSpeak, Recorder, shrinkImage } from '../lib/voi
 
 type Msg = { id?: number; role: 'user' | 'assistant'; content: string; error?: boolean; upgrade?: boolean; attachment_path?: string | null; attachment_kind?: string | null; local?: string; pending?: boolean };
 type Conv = { id: number; title: string; updated_at: string; last: string | null };
-const SUGGESTED = ['✍️ Write a caption for my beach photo', '💡 Weekend ideas in Lagos', '🌍 Translate “good morning” to Yoruba', '📚 Explain photosynthesis simply', '🎬 How do I go live?', '🔒 How do I make my posts private?'];
+const SUGGESTED = ['✍️ Write a caption for my beach photo', '💡 Weekend ideas near me', '🌍 Translate “good morning” to Spanish', '📚 Explain photosynthesis simply', '🎬 How do I go live?', '🔒 How do I make my posts private?'];
 
 // Tiny safe formatter: **bold** and line breaks, no HTML injection.
 function Rich({ text }: { text: string }) {

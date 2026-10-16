@@ -13,7 +13,7 @@ import { config } from './config.js';
 import { pushTo } from './push.js';
 
 const EMAIL_TYPES = { friend_request: (a) => [`${a} sent you a friend request`, `${a} wants to be friends on Connectly.`], friend_accept: (a) => [`${a} accepted your friend request`, `You and ${a} are now friends on Connectly.`] };
-const PUSH_TEXT = { like: 'reacted to your post', comment: 'commented on your post', reply: 'replied to your comment', follow: 'started following you', follow_request: 'requested to follow you', follow_accept: 'accepted your follow request', mention: 'mentioned you', live: 'is live now', event_reminder: 'has an event starting soon', event_going: 'is going to your event', remix: 'remixed your reel', verified_approved: 'approved your verified badge', verified_rejected: 'reviewed your verified badge request' };
+const PUSH_TEXT = { report_reviewed: 'reviewed your report. Thanks for helping keep Connectly safe.', report_actioned: 'took action on something you reported. Thank you.', tip: 'sent you a tip', like: 'reacted to your post', comment: 'commented on your post', reply: 'replied to your comment', follow: 'started following you', follow_request: 'requested to follow you', follow_accept: 'accepted your follow request', mention: 'mentioned you', live: 'is live now', event_reminder: 'has an event starting soon', event_going: 'is going to your event', remix: 'remixed your reel', verified_approved: 'approved your verified badge', verified_rejected: 'reviewed your verified badge request' };
 // Creates an in-app notification (if enabled) and sends email for friend events (if enabled). Never throws.
 export async function notify(userId, actorId, type, extra = {}) {
   try {
@@ -33,7 +33,7 @@ export async function notify(userId, actorId, type, extra = {}) {
 const slugify = (s) => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'page';
 export const SPACE_CATEGORIES = ['Business', 'Brand or product', 'Community', 'Education', 'Entertainment', 'Faith', 'Food & drink', 'Health & fitness', 'Local business', 'Music', 'News & media', 'Non-profit', 'Public figure', 'Sports', 'Technology', 'Travel', 'Other'];
 export const LISTING_CATEGORIES = ['Vehicles', 'Property for rent', 'Property for sale', 'Electronics', 'Phones & tablets', 'Home & garden', 'Fashion', 'Baby & kids', 'Health & beauty', 'Hobbies', 'Sports & outdoors', 'Pets', 'Jobs', 'Services', 'Other'];
-export const CURRENCIES = ['NGN', 'USD', 'GBP', 'EUR', 'GHS', 'KES', 'ZAR', 'CAD', 'XOF'];
+export const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'INR', 'JPY', 'BRL', 'MXN', 'NGN', 'GHS', 'KES', 'ZAR', 'XOF'];
 const DEVICE_COOKIE = 'cx_device';
 const deviceCookieOpts = () => ({ httpOnly: true, secure: config.cookieSecure, sameSite: 'strict', path: '/', maxAge: 365 * 864e5 });
 
@@ -314,7 +314,7 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
   // change email / phone: code goes to the NEW address; confirmed only with that code
   const changeKey = (uid, idf) => `change:${uid}:${idf.type}:${idf.value}`;
   api.post('/me/identifier/start', requireAuth, async (req, res) => {
-    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('NG'), password: z.string().min(1).max(200) }).strict().parse(req.body);
+    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('US'), password: z.string().min(1).max(200) }).strict().parse(req.body);
     const { rows } = await q('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
     if (!(await bcrypt.compare(d.password, rows[0].password_hash))) return res.status(403).json({ error: 'Password is not correct' });
     const idf = parseIdentifier(d.identifier, d.country);
@@ -326,7 +326,7 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
     res.json({ ok: true, type: idf.type, sent_to: idf.value });
   });
   api.post('/me/identifier/confirm', requireAuth, async (req, res) => {
-    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('NG'), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).strict().parse(req.body);
+    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('US'), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).strict().parse(req.body);
     const idf = parseIdentifier(d.identifier, d.country);
     const r = await consumeCode(changeKey(req.user.id, idf), 'change_identifier', d.code);
     if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
