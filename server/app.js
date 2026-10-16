@@ -12,7 +12,7 @@ import { q, pool } from './db.js';
 import { config } from './config.js';
 import { issueCode, consumeCode, CODE_ERRORS, keyOf, createTicket, readTicket, useTicket } from './codes.js';
 import { smtpConfigured, sendMail } from './mailer.js';
-import { smsConfigured, phoneEnabled } from './sms.js';
+import { smsConfigured, phoneEnabled, otpStatus } from './sms.js';
 import { parseIdentifier, identCol, FullName, BirthDate, generateUsername } from './identity.js';
 import { loadUser, requireVerified, requireAuth, requireAdmin, requireModerator, csrfGuard, createSession, destroySession } from './auth.js';
 import { upload, saveImage, removeImage, HttpError } from './uploads.js';
@@ -317,7 +317,7 @@ export function createApp() {
     const { rows: [c] } = await q("SELECT count(*)::int AS n FROM email_codes WHERE identifier = $1 AND purpose = 'login_code' AND created_at > now() - interval '1 hour'", [keyOf(id)]);
     if (c.n >= 5) return res.status(429).json({ error: 'Too many codes requested. Please try again later.' });
     const accts = await accountsFor(id, { verifiedOnly: true });
-    if (accts.length) { const r = await issueCode(target(id), 'login_code'); if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter }); }
+    if (accts.length) { const r = await issueCode(target(id, accts.length === 1 ? accts[0].id : undefined), 'login_code'); if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter }); }
     res.json({ ok: true, sent_to: id.value }); // same answer whether or not an account exists
   });
   api.post('/auth/otp/verify', loginLimiter, async (req, res) => {
@@ -727,6 +727,7 @@ export function createApp() {
   registerRound10(api, { requireAuth, requireModerator, id });
   registerPaidVerification(api, { requireAuth, requireAdmin, id });
   registerStickerPacks(api, { requireAuth, requireAdmin, id });
+  api.get('/admin/otp-status', requireAuth, requireAdmin, async (_req, res) => res.json({ enabled: config.features.phoneAuth, items: await otpStatus() }));
   registerBackfill(api, { requireAuth });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 

@@ -253,3 +253,4 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - MESSAGE_KEY must be stored safely outside the codespace: without it, encrypted messages in backups can't be read.
 - 500 errors are logged without row values; HTTPS_ONLY=1 redirects http and sends HSTS.
 - Planned (not built): opt-in end-to-end encrypted chats (see the round 10 report).
+- Phone codes fall back channel by channel (WhatsApp → Telegram → SMS) and finally to the account's email. `otp_channel_status` (migration 025) records balances (Termii, Africa's Talking, Twilio APIs; Telegram from each send) and failures. Hourly check emails OWNER_EMAIL (or all admins) once a day when a channel is low (OTP_LOW_BALANCE); Admin shows a warning card.

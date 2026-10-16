@@ -2,6 +2,12 @@ import { startPricing } from './pricing.js';
 import { purgeScheduledDeletions } from './app.js';
 import { syncPaidBadges } from './paidverify.js';
 import { encryptBacklog } from './msgcrypt.js';
+import { checkOtpBalances } from './sms.js';
+import { q } from './db.js';
+import { sendMail } from './mailer.js';
+// Owner alerts go to OWNER_EMAIL, or to every admin if it isn't set.
+const alertOwner = async (subject, text) => { const to = process.env.OWNER_EMAIL ? [process.env.OWNER_EMAIL] : (await q("SELECT u.email FROM users u JOIN user_roles ur ON ur.user_id = u.id JOIN roles r ON r.id = ur.role_id WHERE r.name = 'admin' AND u.email IS NOT NULL")).rows.map((r) => r.email); for (const t of to) await sendMail({ to: t, subject, text }).catch(() => {}); };
+setInterval(() => checkOtpBalances(alertOwner).catch((e) => console.error('[otp-balance]', e.message)), 3600e3).unref();
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { startPurgeJob } from './postextras.js';

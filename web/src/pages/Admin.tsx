@@ -23,7 +23,7 @@ export function Admin() {
   useEffect(() => { load(); }, []);
   if (!me?.roles?.includes('admin')) return <div className="card empty">Admins only.</div>;
   const setRole = async (u: AU, role: string, on: boolean) => { try { await api(on ? `/admin/users/${u.id}/roles` : `/admin/users/${u.id}/roles/${role}`, on ? { json: { role } } : { method: 'DELETE' }); load(); } catch (e: any) { setErr(e.message); } };
-  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminPrices /><AdminPaidVerification /><AdminStickerPacks /><AdminFlags /><AdminExtras users={users} />
+  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminPrices /><AdminOtpAlert /><AdminPaidVerification /><AdminStickerPacks /><AdminFlags /><AdminExtras users={users} />
     <h1 className="pagetitle">Admin</h1>
     {err && <p className="error card">{err}</p>}
     {status && <section className="card"><h3>Email delivery</h3><p className={status.smtp_configured ? 'success' : 'notice'}>{status.note}</p></section>}
@@ -90,3 +90,10 @@ function AdminFlags() {
     {items.length === 0 ? <p className="meta">Nothing flagged right now.</p> : items.map((f) => <div key={f.id} className="row between"><span><a href={`/u/${f.username}`}>@{f.username}</a> · {f.detail}</span><button className="btn ghost" onClick={() => api(`/admin/safety-flags/${f.id}/resolve`, { method: 'POST' }).then(load)}>Mark reviewed</button></div>)}</section>;
 }
 
+
+function AdminOtpAlert() {
+  const [items, setItems] = useState<any[]>([]);
+  useEffect(() => { api<{ enabled: boolean; items: any[] }>('/admin/otp-status').then((r) => setItems(r.enabled ? r.items.filter((i) => i.low || i.last_error) : [])).catch(() => {}); }, []);
+  if (!items.length) return null;
+  return <section className="card notice stack"><b>⚠️ Phone codes need attention</b>{items.map((i) => <small key={i.channel}>{i.channel}: {i.low ? 'low balance' : 'recent error'}{i.balance != null ? ` (${i.balance} ${i.currency || ''})` : ''}{i.last_error ? ` · ${i.last_error}` : ''}</small>)}<small className="meta">Codes fall back to the next channel, then email, until this is fixed.</small></section>;
+}

@@ -24,7 +24,14 @@ export async function issueCode(target, purpose, ctx) {
   await q(`INSERT INTO email_codes (identifier, user_id, purpose, code_hash, expires_at) VALUES ($1,$2,$3,$4, now() + interval '${TTL_MIN} minutes')`, [target.key, target.userId || null, purpose, hash(target.key, purpose, code)]);
   const [subject, text] = COPY[purpose](code, ctx);
   if (target.email) await sendMail({ to: target.email, subject, text });
-  else await sendSms(target.phone, `Connectly code: ${code} (expires in ${TTL_MIN} min). Never share it.`, code);
+  else {
+    try { await sendSms(target.phone, `Connectly code: ${code} (expires in ${TTL_MIN} min). Never share it.`, code); }
+    catch (err) { // every phone channel failed: fall back to the account's email, if it has one
+      const { rows: [u] } = target.userId ? await q('SELECT email FROM users WHERE id = $1', [target.userId]) : { rows: [] };
+      if (!u?.email) throw err;
+      await sendMail({ to: u.email, subject, text }); return { ok: true, via: 'email' };
+    }
+  }
   return { ok: true };
 }
 // Returns 'ok' | 'invalid' | 'expired' | 'locked'.
