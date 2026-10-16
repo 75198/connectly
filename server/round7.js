@@ -70,33 +70,33 @@ export function registerRound7(api, { requireAuth, requireVerified, requireAdmin
   // ===== verified badge =====
   api.get('/me/verification', requireAuth, flag('verified'), async (req, res) => {
     const { rows: [u] } = await q('SELECT verified_at FROM users WHERE id = $1', [req.user.id]);
-    const { rows: [r] } = await q('SELECT id, category, reason, status, created_at, decided_at FROM verification_requests WHERE user_id = $1 ORDER BY id DESC LIMIT 1', [req.user.id]);
+    const { rows: [r] } = await q("SELECT id, category, reason, status, created_at, decided_at FROM verification_requests WHERE user_id = $1 AND kind = 'notable' ORDER BY id DESC LIMIT 1", [req.user.id]);
     res.json({ verified: !!u.verified_at, request: r || null });
   });
   api.post('/me/verification', requireVerified, flag('verified'), async (req, res) => {
     const d = z.object({ category: z.enum(['Public figure', 'Creator', 'Business or brand', 'Journalist', 'Organisation', 'Other']), reason: z.string().trim().min(10, 'Tell us a little more about why').max(1000) }).strict().parse(req.body);
     const { rows: [u] } = await q('SELECT verified_at FROM users WHERE id = $1', [req.user.id]);
     if (u.verified_at) return res.status(400).json({ error: 'You’re already verified' });
-    if ((await q("SELECT 1 FROM verification_requests WHERE user_id = $1 AND status = 'pending'", [req.user.id])).rowCount) return res.status(409).json({ error: 'Your request is already being reviewed' });
+    if ((await q("SELECT 1 FROM verification_requests WHERE user_id = $1 AND kind = 'notable' AND status = 'pending'", [req.user.id])).rowCount) return res.status(409).json({ error: 'Your request is already being reviewed' });
     await q('INSERT INTO verification_requests (user_id, category, reason) VALUES ($1,$2,$3)', [req.user.id, d.category, d.reason]);
     res.status(201).json({ ok: true, message: 'Thanks. We’ll review your request.' });
   });
   api.get('/admin/verification', requireAdmin, flag('verified'), async (req, res) => {
     const { rows } = await q(`SELECT r.id, r.category, r.reason, r.status, r.created_at, json_build_object('id', u.id, 'username', u.username, 'full_name', u.full_name, 'avatar_path', u.avatar_path,
-      'followers', (SELECT count(*)::int FROM follows f WHERE f.followee_id = u.id)) AS user FROM verification_requests r JOIN users u ON u.id = r.user_id WHERE r.status = $1 ORDER BY r.id LIMIT 200`, [req.query.status === 'all' ? 'pending' : String(req.query.status || 'pending')]);
+      'followers', (SELECT count(*)::int FROM follows f WHERE f.followee_id = u.id)) AS user FROM verification_requests r JOIN users u ON u.id = r.user_id WHERE r.kind = 'notable' AND r.status = $1 ORDER BY r.id LIMIT 200`, [req.query.status === 'all' ? 'pending' : String(req.query.status || 'pending')]);
     res.json({ items: rows });
   });
   api.post('/admin/verification/:id', requireAdmin, flag('verified'), async (req, res) => {
     const { decision } = z.object({ decision: z.enum(['approve', 'reject']) }).strict().parse(req.body);
     const { rows: [r] } = await q("UPDATE verification_requests SET status = $2, decided_at = now(), decided_by = $3 WHERE id = $1 AND status = 'pending' RETURNING user_id", [id(req.params.id), decision === 'approve' ? 'approved' : 'rejected', req.user.id]);
     if (!r) return res.status(404).json({ error: 'Request not found' });
-    if (decision === 'approve') await q('UPDATE users SET verified_at = COALESCE(verified_at, now()) WHERE id = $1', [r.user_id]);
+    if (decision === 'approve') await q("UPDATE users SET verified_at = COALESCE(verified_at, now()), verified_kind = 'notable' WHERE id = $1", [r.user_id]);
     notify(r.user_id, req.user.id, decision === 'approve' ? 'verified_approved' : 'verified_rejected');
     res.json({ ok: true });
   });
   api.post('/admin/users/:id/verified', requireAdmin, flag('verified'), async (req, res) => {
     const { verified } = z.object({ verified: z.boolean() }).strict().parse(req.body);
-    await q(`UPDATE users SET verified_at = ${verified ? 'COALESCE(verified_at, now())' : 'NULL'} WHERE id = $1`, [id(req.params.id)]); res.json({ ok: true });
+    await q(`UPDATE users SET verified_at = ${verified ? 'COALESCE(verified_at, now())' : 'NULL'}, verified_kind = ${verified ? "'notable'" : 'NULL'} WHERE id = $1`, [id(req.params.id)]); res.json({ ok: true });
   });
 
   // ===== hashtags + trending =====

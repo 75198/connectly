@@ -19,7 +19,7 @@ async function reg(name, full = 'Test ' + name) {
 }
 before(async () => {
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;'); await migrate({ quiet: true });
-  for (const k of ['friendsFeed', 'tips', 'gifts', 'liteMode', 'safetyCenter', 'antiScam', 'messages', 'closeFriends', 'reports', 'aiCreator', 'translate', 'autoTranslate']) config.features[k] = true;
+  for (const k of ['friendsFeed', 'tips', 'gifts', 'liteMode', 'safetyCenter', 'antiScam', 'messages', 'closeFriends', 'reports', 'aiCreator', 'translate', 'autoTranslate', 'msgControls', 'paidVerification', 'hidePresence']) config.features[k] = true;
   app = createApp(); A = await reg('ann'); B = await reg('ben'); C = await reg('cat');
 });
 after(async () => { await pool.end(); });
@@ -74,4 +74,24 @@ test('delete account: 30-day grace, logging in cancels, purge after grace', asyn
   const E = await reg('eve'); await E.post('/api/me/delete').set(H).send({ password: 'Password123!' });
   await pool.query("UPDATE users SET delete_after = now() - interval '1 minute' WHERE id = $1", [E.id]);
   await purgeScheduledDeletions(); assert.equal((await pool.query('SELECT 1 FROM users WHERE id = $1', [E.id])).rowCount, 0);
+});
+
+test('message controls: edit within 15 min, delete for me, read receipts off', async () => {
+  await pool.query('UPDATE users SET dm_privacy = \'everyone\'').catch(() => {});
+  let r = await A.post('/api/conversations').set(H).send({ usernames: [B.username] }); const cid = r.body.id; assert.ok(cid, JSON.stringify(r.body));
+  r = await A.post(`/api/conversations/${cid}/messages`).set(H).field('body', 'helo'); const mid = r.body.id; assert.ok(mid);
+  r = await A.patch(`/api/messages/${mid}`).set(H).send({ body: 'hello' }); assert.equal(r.status, 200); assert.ok(r.body.edited_at);
+  r = await B.patch(`/api/messages/${mid}`).set(H).send({ body: 'x' }); assert.equal(r.status, 403);
+  await pool.query("UPDATE messages SET created_at = now() - interval '20 minutes' WHERE id = $1", [mid]);
+  r = await A.patch(`/api/messages/${mid}`).set(H).send({ body: 'late' }); assert.equal(r.status, 403);
+  r = await B.post(`/api/messages/${mid}/hide`).set(H); assert.equal(r.status, 200);
+  r = await B.get(`/api/conversations/${cid}/messages`); assert.ok(!r.body.items.some((m) => m.id === mid), 'hidden for B');
+  r = await A.get(`/api/conversations/${cid}/messages`); assert.ok(r.body.items.some((m) => m.id === mid && m.edited_at), 'still visible for A');
+});
+
+test('paid verification: requirements gate, flag off hides it', async () => {
+  let r = await A.get('/api/me/paid-verification'); assert.equal(r.status, 200); assert.equal(r.body.payments_ready, false);
+  assert.ok(r.body.checks.find((c) => c.key === 'age' && !c.ok));
+  r = await A.post('/api/me/paid-verification').set(H); assert.equal(r.status, 400);
+  config.features.paidVerification = false; r = await A.get('/api/me/paid-verification'); assert.equal(r.status, 404); config.features.paidVerification = true;
 });

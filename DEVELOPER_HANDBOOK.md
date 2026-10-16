@@ -232,3 +232,9 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 
 ### 26.y Global defaults
 - Phone country defaults come from the device (timezone/locale) with US fallback; server defaults are US. Currency comes from `/pricing/context` (USD fallback). Starter search ideas, sample text and the AI suggestions are location-neutral; news only localises lightly by region/language. Default language is "English (International)".
+
+### 26.z Paid verification (FEATURE_PAID_VERIFICATION)
+- Settings › Get verified (`pages/GetVerified.tsx`, `server/paidverify.js`, migration 022). Monthly price is localised via `priceFor('paid_verification', { usd_cents: 999 })` (admin price overrides apply).
+- Requirements: photo + bio, account ≥ 30 days, two-step login on, no suspension or upheld reports in 90 days, ID + selfie upload. Images are stored in `verify-private/` (outside public uploads, never backed up to git) and deleted after review.
+- Admin › Paid verification queue approves/rejects (sets `paid_approved_at`). The badge turns on only while `paid_verified_until > now()`; `syncPaidBadges()` (every 10 min) adds it and removes it when the subscription lapses. Payment is "Coming soon": Apple/Google require in-app purchase for paid verification in mobile apps.
+- Benefits: badge (reuses `verified_at`, so impersonation protection applies), paid-verified users rank higher in people search, their reports are sorted first for admins. Notable (admin-granted) verification is separate (`verified_kind = 'notable'`) and never lapses.

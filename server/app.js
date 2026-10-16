@@ -31,6 +31,7 @@ import { registerNews, recordSearch } from './news.js';
 import { registerPricing } from './pricing.js';
 import { registerDownloads } from './download.js';
 import { registerRound10 } from './round10.js';
+import { registerPaidVerification } from './paidverify.js';
 import { registerBackfill } from './backfill.js';
 import { registerRound9, notifyMentions, allowedBy, isRestricted } from './round9.js';
 import { hiddenWordsOf, matchesHidden } from './messages.js';
@@ -138,7 +139,7 @@ function liveConnectSrc() {
 }
 export function round78Features() {
   const f = config.features; const out = {};
-  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads', 'autoTranslate', 'friendsFeed', 'aiCreator', 'tips', 'liteMode', 'safetyCenter', 'antiScam', 'msgControls'])
+  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads', 'autoTranslate', 'friendsFeed', 'aiCreator', 'tips', 'liteMode', 'safetyCenter', 'antiScam', 'msgControls', 'paidVerification'])
     out[k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] = !!f[k];
   return out;
 }
@@ -664,7 +665,7 @@ export function createApp() {
         WHERE email_verified_at IS NOT NULL AND deactivated_at IS NULL AND ((lower(username) || ' ' || lower(full_name)) LIKE $1
           OR ($4 AND discover_by_email AND lower(email) = lower($2)) OR ($4 AND discover_by_phone AND length($5) >= 7 AND regexp_replace(coalesce(phone, ''), '\D', '', 'g') LIKE '%' || $5))
         AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $3 AND b.blocked_id = users.id) OR (b.blocker_id = users.id AND b.blocked_id = $3))
-        ORDER BY (lower(username) = lower($2)) DESC, (lower(username) LIKE lower($2) || '%') DESC, full_name LIMIT 20`, [like, term, req.user.id, config.features.discoverability, term.replace(/\D/g, '')]);
+        ORDER BY (lower(username) = lower($2)) DESC, (lower(username) LIKE lower($2) || '%') DESC, (verified_kind = 'paid' AND verified_at IS NOT NULL) DESC, full_name LIMIT 20`, [like, term, req.user.id, config.features.discoverability, term.replace(/\D/g, '')]);
       return res.json({ items: rows, next_cursor: null });
     }
     if (type !== 'posts') {
@@ -689,6 +690,7 @@ export function createApp() {
   registerPricing(api, { requireAuth, requireAdmin });
   registerDownloads(api, { requireAuth, id });
   registerRound10(api, { requireAuth, requireModerator, id });
+  registerPaidVerification(api, { requireAuth, requireAdmin, id });
   registerBackfill(api, { requireAuth });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
@@ -721,7 +723,7 @@ export function createApp() {
         json_build_object('id', tu.id, 'username', tu.username, 'full_name', tu.full_name, 'suspended_at', tu.suspended_at) AS target_user,
         (SELECT count(*)::int FROM reports r2 WHERE r2.target_user_id = r.target_user_id) AS reports_against_user
       FROM reports r JOIN users ru ON ru.id = r.reporter_id LEFT JOIN users tu ON tu.id = r.target_user_id LEFT JOIN posts p ON p.id = r.post_id
-      WHERE ($1 = 'all' OR r.status = $1) ORDER BY (r.status = 'open' AND r.reason ILIKE 'scam%') DESC, r.id DESC LIMIT 200`, [status]);
+      WHERE ($1 = 'all' OR r.status = $1) ORDER BY (r.status = 'open' AND r.reason ILIKE 'scam%') DESC, (r.status = 'open' AND ru.verified_kind = 'paid' AND ru.verified_at IS NOT NULL) DESC, r.id DESC LIMIT 200`, [status]);
     res.json({ items: rows });
   });
   const closeReports = async (where, params, resolution, by) => {

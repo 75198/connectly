@@ -6,6 +6,7 @@ import { useSession } from '../session';
 import { AdminLive } from '../components/LiveRow';
 import { AdminPlans, AdminPrices } from './Plans';
 import { getFeatures } from '../api';
+import { AdminPaidVerification } from './GetVerified';
 
 type AU = { id: number; username: string; full_name: string; email: string; roles: string[]; created_at: string };
 type Rep = { id: number; target_type: 'post' | 'user'; reason: string; status: string; resolution: string; created_at: string; post_id: number | null; post_body: string | null; post_hidden_at: string | null;
@@ -21,7 +22,7 @@ export function Admin() {
   useEffect(() => { load(); }, []);
   if (!me?.roles?.includes('admin')) return <div className="card empty">Admins only.</div>;
   const setRole = async (u: AU, role: string, on: boolean) => { try { await api(on ? `/admin/users/${u.id}/roles` : `/admin/users/${u.id}/roles/${role}`, on ? { json: { role } } : { method: 'DELETE' }); load(); } catch (e: any) { setErr(e.message); } };
-  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminPrices /><AdminFlags /><AdminExtras users={users} />
+  return <div className="stack"><AdminLive />{subs && <AdminPlans />}<AdminPrices /><AdminPaidVerification /><AdminFlags /><AdminExtras users={users} />
     <h1 className="pagetitle">Admin</h1>
     {err && <p className="error card">{err}</p>}
     {status && <section className="card"><h3>Email delivery</h3><p className={status.smtp_configured ? 'success' : 'notice'}>{status.note}</p></section>}

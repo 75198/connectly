@@ -13,6 +13,7 @@ import { TextSize } from './TextSize';
 import { RegionSection } from './Region';
 import { LiteSection } from './SettingsExtra';
 import { SafetyCenter } from './Safety';
+import { GetVerified, GetVerifiedLink } from './GetVerified';
 import { FollowRequests, PeopleList, PrivacyCenter } from './PrivacyCenter';
 const SECTIONS: [string, string, Parameters<typeof Icon>[0]['name']][] = [
   ['account', 'Edit account', 'user'], ['email', 'Change email', 'chat'], ['phone', 'Change phone number', 'chat'], ['password', 'Change password', 'lock'],
@@ -23,8 +24,8 @@ const Back = ({ title }: { title: string }) => <div className="row"><Link to="/s
 
 function SubsLink() {
   const [on, setOn] = useState(false); useEffect(() => { getFeatures().then((f) => setOn(!!f.subscriptions)); }, []);
-  if (!on) return null;
-  return <div className="card list"><Link to="/settings/subscription"><Icon name="shield" /> <span className="grow">Subscription</span><Icon name="chev" /></Link><Link to="/settings/plans"><span className="aiorb xs">✦</span> <span className="grow"><b>Upgrade to Connectly Pro</b></span><Icon name="chev" /></Link></div>;
+  if (!on) return <GetVerifiedLink />;
+  return <><GetVerifiedLink /><div className="card list"><Link to="/settings/subscription"><Icon name="shield" /> <span className="grow">Subscription</span><Icon name="chev" /></Link><Link to="/settings/plans"><span className="aiorb xs">✦</span> <span className="grow"><b>Upgrade to Connectly Pro</b></span><Icon name="chev" /></Link></div></>;
 }
 export function Settings() {
   const { themePref, setThemePref } = useSession();
@@ -45,7 +46,7 @@ export function Settings() {
 
 export function SettingsSection() {
   const { section = '' } = useParams();
-  const C = ({ 'privacy-center': PrivacyCenter, 'follow-requests': FollowRequests, restricted: () => <PeopleList kind="restricted" />, muted: () => <PeopleList kind="muted" />, 'text-size': TextSize, region: RegionSection, lite: LiteSection, safety: SafetyCenter, account: Account, email: () => <ChangeId kind="email" />, phone: () => <ChangeId kind="phone" />, password: Password, blocked: Blocked, activity: Activity, sessions: Sessions, logins: Logins, privacy: Privacy, notifications: Notifications, deactivate: Deactivate, language: LanguageSection, sounds: SoundsSection, security: SecuritySection, verification: VerifySection, 'close-friends': CloseFriendsSection, messaging: MessagingSection } as Record<string, () => JSX.Element>)[section];
+  const C = ({ 'privacy-center': PrivacyCenter, 'follow-requests': FollowRequests, restricted: () => <PeopleList kind="restricted" />, muted: () => <PeopleList kind="muted" />, 'text-size': TextSize, region: RegionSection, lite: LiteSection, safety: SafetyCenter, 'get-verified': GetVerified, account: Account, email: () => <ChangeId kind="email" />, phone: () => <ChangeId kind="phone" />, password: Password, blocked: Blocked, activity: Activity, sessions: Sessions, logins: Logins, privacy: Privacy, notifications: Notifications, deactivate: Deactivate, language: LanguageSection, sounds: SoundsSection, security: SecuritySection, verification: VerifySection, 'close-friends': CloseFriendsSection, messaging: MessagingSection } as Record<string, () => JSX.Element>)[section];
   if (!C) return <div className="card empty">Not found. <Link to="/settings">Back to settings</Link></div>;
   return <C />;
 }

@@ -72,6 +72,7 @@ export const config = {
     liteMode: (env.FEATURE_LITE_MODE ?? '0') === '1',
     safetyCenter: (env.FEATURE_SAFETY_CENTER ?? '0') === '1',
     antiScam: (env.FEATURE_ANTI_SCAM ?? '0') === '1',
+    paidVerification: (env.FEATURE_PAID_VERIFICATION ?? '0') === '1',
     msgControls: (env.FEATURE_MSG_CONTROLS ?? '0') === '1',
     discoverability: (env.FEATURE_DISCOVERABILITY ?? '0') === '1',
     teenSafety: (env.FEATURE_TEEN_SAFETY ?? '0') === '1',
