@@ -1,3 +1,4 @@
+import { StickerPicker, type Pick } from '../components/StickerPacks';
 // Direct messages (round 7): inbox, 1:1 and group chats, photos/videos (Standard or HD), voice notes, stickers,
 // read receipts, typing, themes/wallpapers, reactions, translate, games and calls.
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
@@ -92,7 +93,7 @@ export function Chat() {
     try { const fd = new FormData(); fd.append('body', b); sfx('sent'); add(await uploadForm<Msg>(`/conversations/${cid}/messages`, fd)); } catch (x: any) { setText(b); toast(x.message, 'err'); } };
   const sendFile = async (file: File) => { const fd = new FormData(); fd.append('file', file); fd.append('hd', hd ? '1' : '0'); setBusy(1);
     try { add(await uploadForm<Msg>(`/conversations/${cid}/messages`, fd, (p) => setBusy(Math.max(1, p)))); } catch (x: any) { toast(x.message, 'err'); } finally { setBusy(0); if (fileIn.current) fileIn.current.value = ''; } };
-  const sticker = async (s: string) => { setSheet(''); const fd = new FormData(); fd.append('sticker', s); try { add(await uploadForm<Msg>(`/conversations/${cid}/messages`, fd)); } catch (x: any) { toast(x.message, 'err'); } };
+  const sticker = async (s: Pick) => { setSheet(''); const fd = new FormData(); if (s.id) fd.append('sticker_id', String(s.id)); else fd.append('sticker', s.key || ''); try { add(await uploadForm<Msg>(`/conversations/${cid}/messages`, fd)); } catch (x: any) { toast(x.message, 'err'); } };
   const onType = (v: string) => { setText(v); if (Date.now() - typingSent.current > 3000 && v) { typingSent.current = Date.now(); api(`/conversations/${cid}/typing`, { json: { typing: true } }).catch(() => {}); } };
   const startRec = async () => {
     if (!(await askPermission('microphone'))) return;
@@ -160,7 +161,7 @@ export function Chat() {
         {f?.msg_controls && <button className="optrow danger" onClick={() => hideForMe(react)}>Delete for me</button>}
         {react.sender_id === me.id && <button className="optrow danger" onClick={() => unsend(react)}>{f?.msg_controls ? 'Unsend for everyone' : 'Unsend'}</button>}</div></div></div>}
     {sheet === 'theme' && <ThemeSheet conv={conv} onClose={() => setSheet('')} onSaved={loadConv} />}
-    {sheet === 'stickers' && <StickerSheet onPick={sticker} onClose={() => setSheet('')} />}
+    {sheet === 'stickers' && <StickerPicker onPick={sticker} onClose={() => setSheet('')} />}
     {sheet === 'games' && <GamePicker cid={cid} onClose={() => setSheet('')} onStarted={(m) => { setSheet(''); add(m); }} />}
     {sheet === 'info' && <Sheet title={convName(conv, me.id)} onClose={() => setSheet('')}><div className="list">{conv.members.map((m: Member) => <Link key={m.id} to={`/u/${m.username}`} className="row optrow"><Avatar user={m} size={36} /><span className="grow"><b>{m.full_name}</b> <VerifiedBadge on={m.verified} size={13} /><small className="meta">@{m.username}</small></span></Link>)}
       {f?.disappearing && <div className="stack pad"><b>Disappearing messages</b><div className="segmented">{([[null, 'Off'], [3600, '1 hour'], [86400, '24 hours'], [604800, '7 days']] as const).map(([v, l]) => <button key={l} className={dis === v ? 'on' : ''} onClick={async () => { await api(`/conversations/${cid}/disappear`, { method: 'PUT', json: { seconds: v } }); setDis(v); toast(v ? `New messages disappear after ${l}` : 'Disappearing messages off'); }}>{l}</button>)}</div><small className="meta">New messages vanish after the time you pick. We post a notice if a screenshot is detected, but most phones and browsers don’t let websites detect screenshots, so don’t rely on it.</small></div>}
@@ -180,7 +181,7 @@ function MessageBody({ m, mine, cid, onMenu }: { m: Msg; mine: boolean; cid: num
   if (m.kind === 'notice') return <div className="noticemsg">{mine ? 'You' : 'They'} {m.body}</div>;
   if (m.deleted) return <div className="bubble deleted">Message unsent</div>;
   if (m.filtered && !full) return <div className="bubble filteredmsg" role="button" onClick={() => setFull(true)}>Hidden by your word filter · Tap to see</div>;
-  if (m.kind === 'sticker') return <img className="stickermsg" src={`/stickers/${m.meta?.sticker}.svg`} alt="Sticker" />;
+  if (m.kind === 'sticker') return <img className="stickermsg" src={m.meta?.url || `/stickers/${m.meta?.sticker}.svg`} alt="Sticker" />;
   if (m.kind === 'game') return <GameCard gameId={m.meta?.game_id} />;
   if (m.kind === 'call') return <div className="bubble callmsg">{m.meta?.video ? '🎥' : '📞'} {mine ? 'You started a call' : 'Started a call'} · <Link to={`/call/${cid}?video=${m.meta?.video ? 1 : 0}&join=1`}>Join</Link></div>;
   if (m.kind === 'voice') return <div className="bubble voicemsg"><audio controls preload="none" src={m.media_path || ''} />{m.meta?.duration ? <small>{Math.floor(m.meta.duration / 60)}:{String(m.meta.duration % 60).padStart(2, '0')}</small> : null}</div>;

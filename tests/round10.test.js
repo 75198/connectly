@@ -95,3 +95,20 @@ test('paid verification: requirements gate, flag off hides it', async () => {
   r = await A.post('/api/me/paid-verification').set(H); assert.equal(r.status, 400);
   config.features.paidVerification = false; r = await A.get('/api/me/paid-verification'); assert.equal(r.status, 404); config.features.paidVerification = true;
 });
+
+test('sticker packs: create, import, share link, save, send in comment, report', async () => {
+  config.features.stickerPacks = true; config.features.stickers = true;
+  const png = await (await import('sharp')).default({ create: { width: 64, height: 64, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 0.5 } } }).png().toBuffer();
+  let r = await A.post('/api/sticker-packs').set(H).send({ name: 'Mine' }); assert.equal(r.status, 201); const pack = r.body;
+  r = await A.post(`/api/sticker-packs/${pack.id}/stickers`).set(H).attach('files', png, 'a.png'); assert.equal(r.status, 201, JSON.stringify(r.body)); const sid = r.body.items[0].id;
+  r = await B.post(`/api/sticker-packs/${pack.id}/stickers`).set(H).attach('files', png, 'a.png'); assert.equal(r.status, 404, 'only owner adds');
+  r = await B.get(`/api/sticker-packs/share/${pack.share_token}`); assert.equal(r.status, 200); assert.equal(r.body.stickers.length, 1); assert.equal(r.body.share_token, undefined);
+  r = await B.post(`/api/sticker-packs/share/${pack.share_token}/save`).set(H); assert.equal(r.status, 200);
+  r = await B.get('/api/sticker-packs/mine'); assert.ok(r.body.items.some((p) => p.id === pack.id));
+  r = await A.post('/api/posts').set(H).field('body', 'sticker post').field('visibility', 'public'); const postId = r.body.id; assert.ok(postId, JSON.stringify(r.body));
+  r = await B.post(`/api/posts/${postId}/comments`).set(H).send({ body: '', sticker_id: sid }); assert.equal(r.status, 201, JSON.stringify(r.body)); assert.ok(r.body.sticker_url);
+  r = await C.post(`/api/posts/${postId}/comments`).set(H).send({ body: '', sticker_id: sid }); assert.equal(r.status, 400, 'not saved -> not usable');
+  r = await B.get(`/api/posts/${postId}/comments`); assert.ok(r.body.items.some((c) => c.sticker_url));
+  r = await B.post(`/api/sticker-packs/${pack.id}/report`).set(H).send({ reason: 'Hate or harassment' }); assert.equal(r.status, 200);
+  r = await A.post(`/api/sticker-packs/${pack.id}/report`).set(H).send({ reason: 'x x' }); assert.equal(r.status, 400, 'no self-report');
+});

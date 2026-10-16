@@ -73,6 +73,8 @@ export const config = {
     safetyCenter: (env.FEATURE_SAFETY_CENTER ?? '0') === '1',
     antiScam: (env.FEATURE_ANTI_SCAM ?? '0') === '1',
     paidVerification: (env.FEATURE_PAID_VERIFICATION ?? '0') === '1',
+    stickerPacks: (env.FEATURE_STICKER_PACKS ?? '0') === '1',
+    phoneAuth: (env.FEATURE_PHONE_AUTH ?? '0') === '1', // phone signup/login by SMS code; also needs an SMS provider in .env
     msgControls: (env.FEATURE_MSG_CONTROLS ?? '0') === '1',
     discoverability: (env.FEATURE_DISCOVERABILITY ?? '0') === '1',
     teenSafety: (env.FEATURE_TEEN_SAFETY ?? '0') === '1',

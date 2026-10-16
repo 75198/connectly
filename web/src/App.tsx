@@ -1,5 +1,6 @@
 import { initLite } from './lib/lite';
 import { Earnings } from './components/Tips';
+import { MyStickers, SharedPack } from './components/StickerPacks';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { SessionProvider, useSession } from './session';
@@ -13,6 +14,7 @@ import { sfx } from './lib/sounds';
 const Auth = () => import('./pages/Auth');
 const Login = lazy(() => Auth().then((m) => ({ default: m.Login })));
 const Forgot = lazy(() => Auth().then((m) => ({ default: m.Forgot })));
+const PhoneCodeLogin = lazy(() => Auth().then((m) => ({ default: m.PhoneCodeLogin })));
 const Signup = lazy(() => import('./pages/Signup').then((m) => ({ default: m.Signup })));
 const Onboarding = lazy(() => import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })));
 const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })));
@@ -91,7 +93,7 @@ function Router() {
     {legal}
     <Route path="/" element={<Hero />} /><Route path="/welcome" element={<Hero />} />
     <Route path="/login" element={<Login />} /><Route path="/signup" element={<Signup />} />
-    <Route path="/register" element={<Navigate to="/signup" replace />} /><Route path="/forgot" element={<Forgot />} /><Route path="/find" element={<FindAccount />} />
+    <Route path="/register" element={<Navigate to="/signup" replace />} /><Route path="/forgot" element={<Forgot />} /><Route path="/login/code" element={<PhoneCodeLogin />} /><Route path="/find" element={<FindAccount />} />
     <Route path="*" element={<Navigate to="/login" replace state={{ from: loc.pathname }} />} />
   </Routes></Suspense>;
   if (!me.onboarded && !['/terms', '/privacy'].includes(loc.pathname)) return <Suspense fallback={<Loading />}><Onboarding /></Suspense>;
@@ -109,7 +111,7 @@ function Router() {
     <Route path="/me" element={<Hub />} /><Route path="/me/:tab" element={<MyPosts />} /><Route path="/notifications" element={<Notifications />} /><Route path="/friends" element={<Friends />} /><Route path="/u/:username/:list" element={<Friends />} />
     <Route path="/post/:id" element={<PostPage />} /><Route path="/create/:kind" element={<CreateSpace />} /><Route path="/s/:slug" element={<SpaceView />} />
     <Route path="/messages" element={<Inbox />} /><Route path="/tag/:tag" element={<TagPage />} /><Route path="/sound/:id" element={<SoundPage />} /><Route path="/challenges" element={<Challenges />} />
-    <Route path="/events" element={<Events />} /><Route path="/events/new" element={<NewEvent />} /><Route path="/events/:id" element={<EventPage />} /><Route path="/memories" element={<Memories />} /><Route path="/me/streak" element={<StreakPage />} /><Route path="/me/coins" element={<Wallet />} /><Route path="/me/earnings" element={<Earnings />} /><Route path="/me/insights" element={<Insights />} />
+    <Route path="/stickers" element={<MyStickers />} /><Route path="/stickers/add/:token" element={<SharedPack />} /><Route path="/events" element={<Events />} /><Route path="/events/new" element={<NewEvent />} /><Route path="/events/:id" element={<EventPage />} /><Route path="/memories" element={<Memories />} /><Route path="/me/streak" element={<StreakPage />} /><Route path="/me/coins" element={<Wallet />} /><Route path="/me/earnings" element={<Earnings />} /><Route path="/me/insights" element={<Insights />} />
     <Route path="/market" element={<Market />} /><Route path="/market/new" element={<NewListing />} /><Route path="/market/:id" element={<ListingView />} />
     {me.roles?.includes('admin') && <Route path="/admin" element={<Admin />} />}
     {['/login', '/signup', '/register', '/forgot', '/find', '/welcome'].map((p) => <Route key={p} path={p} element={<Navigate to="/" replace />} />)}

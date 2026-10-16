@@ -70,6 +70,7 @@ export function Login() {
       {f.err && <p className="error" role="alert">{f.err}</p>}
       <button className="btn primary block" disabled={f.busy}>{f.busy ? 'Logging in…' : 'Log in'}</button>
     </form>
+    <PhoneCodeLink />
     <p className="center"><Link to="/forgot">Forgot password?</Link> · <Link to="/find">Find your account</Link></p><hr />
     <p className="center">New to {brand.name}? <Link to="/signup">Create an account</Link></p>
   </AuthShell>;
@@ -123,3 +124,37 @@ function CodeAccounts({ purpose, title, intro, allowUsername }: { purpose: 'rese
 }
 export const Forgot = () => <CodeAccounts purpose="reset_password" title="Reset your password" intro="Enter the email or phone number on your account. We’ll send you a 6-digit code." />;
 export const FindAccount = () => <CodeAccounts purpose="find_account" title="Find your account" intro="Search by email, phone number or username. We’ll send a code to the email or phone on file, then show the accounts linked to it." allowUsername />;
+
+function PhoneCodeLink() {
+  const [on, setOn] = useState(false);
+  useEffect(() => { api<{ phone_otp_login?: boolean }>('/auth/capabilities').then((c) => setOn(!!c.phone_otp_login)).catch(() => {}); }, []);
+  return on ? <p className="center"><Link to="/login/code">Log in with a text message code</Link></p> : null;
+}
+// Phone login with a one-time SMS code. If several accounts share the number, the user picks one first.
+export function PhoneCodeLogin() {
+  const { refresh } = useSession(); const nav = useNavigate();
+  const [phone, setPhone] = useState(''); const [country, setCountry] = useState(guessCountry); const [sent, setSent] = useState(false); const [code, setCode] = useState('');
+  const [choose, setChoose] = useState<{ username: string; full_name: string; avatar_path: string | null }[] | null>(null); const [two, setTwo] = useState(false);
+  const f = useForm(async () => {
+    if (!sent) { await api('/auth/otp/start', { json: { identifier: phone, country } }); setSent(true); return; }
+    await verify();
+  });
+  const verify = async (username?: string) => {
+    const r = await api<{ ok?: boolean; choose?: any[]; two_step?: boolean }>('/auth/otp/verify', { json: { identifier: phone, country, code, ...(username ? { username } : {}) } });
+    if (r.choose) { setChoose(r.choose); return; }
+    if (r.two_step) { setTwo(true); return; }
+    await refresh(); nav('/');
+  };
+  return <AuthShell title="Log in with a code">
+    {two ? <p className="notice">Your account has two-step login on. Please <Link to="/login">log in with your password</Link> to finish.</p>
+    : choose ? <div className="stack"><p>Which account?</p>{choose.map((a) => <button key={a.username} className="row optrow" onClick={() => verify(a.username).catch((e) => alert(e.message))}><Avatar user={a} size={36} /> <span className="grow"><b>{a.full_name}</b> <small className="meta">@{a.username}</small></span></button>)}</div>
+    : <form className="stack" onSubmit={f.submit}>
+      {!sent ? <><p className="meta">Enter your phone number. We’ll text you a 6-digit code.</p><IdentifierInput value={phone} onChange={setPhone} country={country} onCountry={setCountry} autoFocus /></>
+        : <><p className="meta">If an account uses <b>{phone}</b>, we just texted it a code. Never share this code with anyone.</p><CodeInput value={code} onChange={setCode} /></>}
+      {f.err && <p className="error" role="alert">{f.err}</p>}
+      <button className="btn primary block" disabled={f.busy || (!sent ? !phone : code.length !== 6)}>{f.busy ? 'Please wait…' : sent ? 'Log in' : 'Send code'}</button>
+      {sent && <button type="button" className="linkish" onClick={() => { setSent(false); setCode(''); }}>Use a different number</button>}
+    </form>}
+    <p className="center"><Link to="/login">Log in with a password</Link></p>
+  </AuthShell>;
+}

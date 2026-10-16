@@ -12,7 +12,7 @@ import { q, pool } from './db.js';
 import { config } from './config.js';
 import { issueCode, consumeCode, CODE_ERRORS, keyOf, createTicket, readTicket, useTicket } from './codes.js';
 import { smtpConfigured, sendMail } from './mailer.js';
-import { smsConfigured } from './sms.js';
+import { smsConfigured, phoneEnabled } from './sms.js';
 import { parseIdentifier, identCol, FullName, BirthDate, generateUsername } from './identity.js';
 import { loadUser, requireVerified, requireAuth, requireAdmin, requireModerator, csrfGuard, createSession, destroySession } from './auth.js';
 import { upload, saveImage, removeImage, HttpError } from './uploads.js';
@@ -32,6 +32,7 @@ import { registerPricing } from './pricing.js';
 import { registerDownloads } from './download.js';
 import { registerRound10 } from './round10.js';
 import { registerPaidVerification } from './paidverify.js';
+import { registerStickerPacks, usableSticker } from './stickerpacks.js';
 import { registerBackfill } from './backfill.js';
 import { registerRound9, notifyMentions, allowedBy, isRestricted } from './round9.js';
 import { hiddenWordsOf, matchesHidden } from './messages.js';
@@ -64,7 +65,8 @@ const Visibility = z.enum(['public', 'friends', 'private']);
 export const REACTIONS = ['like', 'love', 'haha', 'wow', 'sad', 'angry'];
 const PostCreateSchema = z.object({ body: z.string().trim().max(5000).default(''), visibility: Visibility.default('public'), feeling: z.string().trim().max(40).default(''), location_tag: z.string().trim().max(120).default(''), as_draft: z.enum(['0', '1']).default('0'), enhance: z.enum(['0', '1']).optional() }).strict();
 const PostEditSchema = z.object({ body: z.string().trim().max(5000).optional(), visibility: Visibility.optional(), remove_image: z.boolean().optional(), feeling: z.string().trim().max(40).optional(), location_tag: z.string().trim().max(120).optional() }).strict();
-const CommentSchema = z.object({ body: z.string().trim().min(1).max(2000), parent_id: z.number().int().positive().nullish() }).strict();
+const CommentSchema = z.object({ body: z.string().trim().max(2000).default(''), parent_id: z.number().int().positive().nullish(), sticker_id: z.number().int().positive().nullish(), sticker_key: z.string().regex(/^[a-z0-9-]{1,40}$/).nullish() }).strict()
+  .refine((d) => d.body || d.sticker_id || d.sticker_key, { message: 'Write a comment', path: ['body'] });
 const welcomeText = (name) => `Hi ${name.split(' ')[0]},
 
 Welcome to Connectly! Your account is ready.
@@ -139,7 +141,7 @@ function liveConnectSrc() {
 }
 export function round78Features() {
   const f = config.features; const out = {};
-  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads', 'autoTranslate', 'friendsFeed', 'aiCreator', 'tips', 'liteMode', 'safetyCenter', 'antiScam', 'msgControls', 'paidVerification'])
+  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads', 'autoTranslate', 'friendsFeed', 'aiCreator', 'tips', 'liteMode', 'safetyCenter', 'antiScam', 'msgControls', 'paidVerification', 'stickerPacks'])
     out[k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] = !!f[k];
   return out;
 }
@@ -228,9 +230,9 @@ export function createApp() {
   // then calls /auth/register once. Only then is a *pending* account created and a code sent.
   const Ident = z.object({ identifier: z.string().max(200), country: z.string().length(2).toUpperCase().default('US') });
   const requireChannel = (id) => {
-    if (id.type === 'phone' && !smsConfigured()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
+    if (id.type === 'phone' && !phoneEnabled()) throw new HttpError(400, 'Phone sign-up is coming soon. Please use your email address for now.');
   };
-  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: smsConfigured(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero, ai_support: config.features.aiSupport, live: config.features.live, subscriptions: config.features.subscriptions, ...round78Features() } }));
+  api.get('/auth/capabilities', (_req, res) => res.json({ phone_signup: phoneEnabled(), phone_otp_login: phoneEnabled(), email_signup: true, min_age: 13, signup_pow: config.features.signupPow, features: { reels: config.features.reels, welcome_hero: config.features.welcomeHero, ai_support: config.features.aiSupport, live: config.features.live, subscriptions: config.features.subscriptions, ...round78Features() } }));
   api.get('/auth/challenge', authLimiter, (_req, res) => res.json(newChallenge()));
   const MAX_ACCOUNTS = 10;
   const accountsFor = async (id, { verifiedOnly = true } = {}) => (await q(
@@ -303,6 +305,33 @@ export function createApp() {
     requireChannel(id);
     const r = await issueCode(target(id, u.id), 'verify_email');
     if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter });
+    res.json({ ok: true });
+  });
+  // Log in with a one-time SMS code (phone accounts). Same limiters as password login, plus an hourly cap per number.
+  api.post('/auth/otp/start', loginLimiter, async (req, res) => {
+    const d = Ident.strict().parse(req.body); if (!phoneEnabled()) return res.status(404).json({ error: 'Not found' });
+    let id; try { id = parseIdentifier(d.identifier, d.country); } catch { return res.status(400).json({ error: 'Enter a valid phone number' }); }
+    if (id.type !== 'phone') return res.status(400).json({ error: 'Enter a valid phone number' });
+    const { rows: [c] } = await q("SELECT count(*)::int AS n FROM email_codes WHERE identifier = $1 AND purpose = 'login_code' AND created_at > now() - interval '1 hour'", [keyOf(id)]);
+    if (c.n >= 5) return res.status(429).json({ error: 'Too many codes requested. Please try again later.' });
+    const accts = await accountsFor(id, { verifiedOnly: true });
+    if (accts.length) { const r = await issueCode(target(id), 'login_code'); if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code`, retry_after: r.retryAfter }); }
+    res.json({ ok: true, sent_to: id.value }); // same answer whether or not an account exists
+  });
+  api.post('/auth/otp/verify', loginLimiter, async (req, res) => {
+    const d = Ident.extend({ code: Code, username: z.string().max(40).optional() }).strict().parse(req.body); if (!phoneEnabled()) return res.status(404).json({ error: 'Not found' });
+    let id; try { id = parseIdentifier(d.identifier, d.country); } catch { return res.status(400).json({ error: 'Enter a valid phone number' }); }
+    const accts = (await accountsFor(id, { verifiedOnly: true })).filter((a) => !d.username || a.username.toLowerCase() === d.username.toLowerCase());
+    if (accts.length > 1) { // several accounts on one number: verify the code later, once they pick
+      return res.json({ choose: accts.map((a) => ({ username: a.username, full_name: a.full_name, avatar_path: a.avatar_path })) });
+    }
+    const r = await consumeCode(keyOf(id), 'login_code', d.code); if (r !== 'ok' || !accts[0]) return res.status(400).json({ error: CODE_ERRORS[r] || CODE_ERRORS.invalid, reason: r });
+    const hit = accts[0];
+    const { rows: [u] } = await q('SELECT suspended_at, deactivated_at FROM users WHERE id = $1', [hit.id]);
+    if (u.suspended_at) return res.status(403).json({ error: 'This account has been suspended for breaking the Community Standards.', code: 'SUSPENDED' });
+    if (u.deactivated_at) await q('UPDATE users SET deactivated_at = NULL, delete_after = NULL WHERE id = $1', [hit.id]);
+    const tw = await twoStepMethods(hit.id); if (tw) return res.json(await startTwoStep(hit.id, req.get('user-agent'), tw));
+    await createSession(res, hit.id, req.get('user-agent'), req); await loginAlert(hit.id, req.get('user-agent'));
     res.json({ ok: true });
   });
   api.post('/auth/login', loginLimiter, loginIdLimiter, async (req, res) => {
@@ -532,6 +561,7 @@ export function createApp() {
     const p = await getVisiblePost(req.user.id, id(req.params.id));
     if (!p) return res.status(404).json({ error: 'Post not found' });
     const { rows } = await q(`SELECT c.id, c.post_id, c.parent_id, c.body, c.created_at,
+      COALESCE((SELECT s.image_path FROM stickers s JOIN sticker_packs sp ON sp.id = s.pack_id WHERE s.id = c.sticker_id AND sp.hidden_at IS NULL), CASE WHEN c.sticker_key IS NOT NULL THEN '/stickers/' || c.sticker_key || '.svg' END) AS sticker_url,
       ${authorJson('c', 'u')} AS author, (c.author_id = $2) AS is_mine
       FROM comments c JOIN users u ON u.id = c.author_id AND u.deactivated_at IS NULL WHERE c.post_id = $1
        AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $2 AND b.blocked_id = c.author_id) OR (b.blocker_id = c.author_id AND b.blocked_id = $2))
@@ -561,7 +591,10 @@ export function createApp() {
     }
     { const { rows: [o] } = await q('SELECT author_id FROM posts WHERE id = $1', [p.id]); if (!(await allowedBy(o.author_id, req.user.id, 'who_can_comment'))) return res.status(403).json({ error: 'Comments are limited on this post' }); }
     const asSpace = await actingPage(req);
-    const { rows } = await q('INSERT INTO comments (post_id, author_id, parent_id, body, as_space_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, post_id, parent_id, body, created_at', [p.id, req.user.id, parent, d.body, asSpace]);
+    let st = null; if (d.sticker_id) { if (!config.features.stickerPacks) return res.status(404).json({ error: 'Not found' }); st = await usableSticker(req.user.id, d.sticker_id); if (!st) return res.status(400).json({ error: 'Sticker not available' }); }
+    if (d.sticker_key && !config.features.stickers) return res.status(404).json({ error: 'Not found' });
+    const { rows } = await q('INSERT INTO comments (post_id, author_id, parent_id, body, as_space_id, sticker_id, sticker_key) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, post_id, parent_id, body, created_at, sticker_key', [p.id, req.user.id, parent, d.body, asSpace, st?.id || null, d.sticker_key || null]);
+    rows[0].sticker_url = st?.image_path || (d.sticker_key ? `/stickers/${d.sticker_key}.svg` : null);
     const { rows: own } = await q('SELECT author_id FROM posts WHERE id = $1', [p.id]);
     if (!(await isRestricted(own[0].author_id, req.user.id))) await notify(own[0].author_id, req.user.id, parent ? 'reply' : 'comment', { post_id: p.id, comment_id: rows[0].id });
     await notifyMentions(d.body, req.user.id, 'mention', { post_id: p.id, comment_id: rows[0].id });
@@ -691,6 +724,7 @@ export function createApp() {
   registerDownloads(api, { requireAuth, id });
   registerRound10(api, { requireAuth, requireModerator, id });
   registerPaidVerification(api, { requireAuth, requireAdmin, id });
+  registerStickerPacks(api, { requireAuth, requireAdmin, id });
   registerBackfill(api, { requireAuth });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 

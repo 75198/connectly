@@ -8,7 +8,8 @@ import { HttpError, upload, uploadMany, saveImage, removeImage } from './uploads
 import { createSession, destroySession, COOKIE, sha256, randomToken } from './auth.js';
 import { issueCode, consumeCode, CODE_ERRORS } from './codes.js';
 import { parseIdentifier, identCol } from './identity.js';
-import { smsConfigured } from './sms.js';
+import { smsConfigured, phoneEnabled } from './sms.js';
+import { countryOfIp } from './pricing.js';
 import { config } from './config.js';
 import { pushTo } from './push.js';
 
@@ -300,25 +301,56 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
   });
 
   // ---------- account & security ----------
+  // Sensitive changes (password, email, phone) need the current password AND a 6-digit code sent to the account's current email (or phone).
+  const secKey = (uid) => `sec:${uid}`;
+  const secCtx = (req, what) => {
+    const ua = String(req.get('user-agent') || ''); const br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'a browser';
+    const os = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+    const cc = countryOfIp(req.ip); let place = ''; try { place = cc ? new Intl.DisplayNames(['en'], { type: 'region' }).of(cc) : ''; } catch { place = cc || ''; }
+    const time = new Date().toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' UTC';
+    return { what, device: os ? `${br} on ${os}` : br, place, time, secureUrl: `${config.appUrl}/forgot` };
+  };
+  const secTarget = async (uid) => { const { rows: [u] } = await q('SELECT email, phone FROM users WHERE id = $1', [uid]); return { key: secKey(uid), email: u.email || null, phone: u.email ? null : u.phone, userId: uid }; };
+  const pwFails = new Map(); // per-user wrong-password counter for sensitive changes
+  const checkPw = async (uid, pw) => {
+    const f = pwFails.get(uid); if (f && f.n >= 5 && Date.now() - f.at < 15 * 60e3) return 'locked';
+    const { rows: [u] } = await q('SELECT password_hash FROM users WHERE id = $1', [uid]);
+    if (await bcrypt.compare(pw, u.password_hash)) { pwFails.delete(uid); return 'ok'; }
+    pwFails.set(uid, { n: (f && Date.now() - f.at < 15 * 60e3 ? f.n : 0) + 1, at: Date.now() }); return 'bad';
+  };
+  const pwError = (r, res) => res.status(r === 'locked' ? 429 : 403).json({ error: r === 'locked' ? 'Too many tries. Please wait a few minutes and try again.' : 'Current password is not correct' });
+  const alert = async (uid, subject, text) => { const { rows: [u] } = await q('SELECT email FROM users WHERE id = $1', [uid]); if (u?.email) await sendMail({ to: u.email, subject, text }).catch(() => {}); };
+  api.post('/me/security-code', requireAuth, async (req, res) => {
+    const d = z.object({ password: z.string().min(1).max(200), action: z.enum(['password', 'email', 'phone']) }).strict().parse(req.body);
+    const ok = await checkPw(req.user.id, d.password); if (ok !== 'ok') return pwError(ok, res);
+    const { rows: [c] } = await q("SELECT count(*)::int AS n FROM email_codes WHERE identifier = $1 AND purpose = 'security_change' AND created_at > now() - interval '1 hour'", [secKey(req.user.id)]);
+    if (c.n >= 5) return res.status(429).json({ error: 'Too many codes requested. Please try again later.' });
+    const t = await secTarget(req.user.id); if (!t.email && !(t.phone && smsConfigured())) return res.status(400).json({ error: 'Add an email address to your account first.' });
+    const r = await issueCode(t, 'security_change', secCtx(req, { password: 'password', email: 'email address', phone: 'phone number' }[d.action]));
+    if (!r.ok) return res.status(429).json({ error: `Please wait ${r.retryAfter}s before requesting another code` });
+    res.json({ ok: true, sent_to: t.email ? t.email.replace(/^(.).*(@.*)$/, '$1•••$2') : 'your phone' });
+  });
   api.post('/me/password', requireAuth, async (req, res) => {
-    const d = z.object({ current_password: z.string().min(1).max(200), new_password: z.string().min(8, 'Password must be at least 8 characters').max(200) }).strict().parse(req.body);
-    const { rows } = await q('SELECT password_hash, email, phone FROM users WHERE id = $1', [req.user.id]);
-    if (!(await bcrypt.compare(d.current_password, rows[0].password_hash))) return res.status(403).json({ error: 'Current password is not correct' });
+    const d = z.object({ current_password: z.string().min(1).max(200), new_password: z.string().min(8, 'Password must be at least 8 characters').max(200), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).strict().parse(req.body);
+    const ok = await checkPw(req.user.id, d.current_password); if (ok !== 'ok') return pwError(ok, res);
+    const cr = await consumeCode(secKey(req.user.id), 'security_change', d.code); if (cr !== 'ok') return res.status(400).json({ error: CODE_ERRORS[cr], reason: cr });
+    const { rows } = await q('SELECT email, phone FROM users WHERE id = $1', [req.user.id]);
     const { rows: sib } = await q('SELECT password_hash FROM users WHERE id <> $1 AND email_verified_at IS NOT NULL AND ((email IS NOT NULL AND lower(email) = lower($2)) OR (phone IS NOT NULL AND phone = $3))', [req.user.id, rows[0].email || '', rows[0].phone || '']);
     for (const s of sib) if (await bcrypt.compare(d.new_password, s.password_hash)) return res.status(409).json({ error: 'Another account on your email/phone uses that password. Choose a different one.' });
     await q('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [await bcrypt.hash(d.new_password, BCRYPT_COST), req.user.id]);
     await q('DELETE FROM sessions WHERE user_id = $1 AND id <> $2', [req.user.id, req.user.session_id]);
     await q('DELETE FROM saved_logins WHERE user_id = $1', [req.user.id]);
+    await alert(req.user.id, 'Your Connectly password was changed', `Your Connectly password was just changed and other devices were signed out.\n\nIf this wasn't you, secure your account now: ${config.appUrl}/forgot`);
     res.json({ ok: true });
   });
   // change email / phone: code goes to the NEW address; confirmed only with that code
   const changeKey = (uid, idf) => `change:${uid}:${idf.type}:${idf.value}`;
   api.post('/me/identifier/start', requireAuth, async (req, res) => {
-    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('US'), password: z.string().min(1).max(200) }).strict().parse(req.body);
-    const { rows } = await q('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
-    if (!(await bcrypt.compare(d.password, rows[0].password_hash))) return res.status(403).json({ error: 'Password is not correct' });
+    const d = z.object({ identifier: z.string().min(1).max(200), country: z.string().length(2).toUpperCase().default('US'), password: z.string().min(1).max(200), sec_code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).strict().parse(req.body);
+    const ok = await checkPw(req.user.id, d.password); if (ok !== 'ok') return pwError(ok, res);
     const idf = parseIdentifier(d.identifier, d.country);
-    if (idf.type === 'phone' && !smsConfigured()) return res.status(400).json({ error: 'Adding a phone number is coming soon (SMS isn’t set up yet).' });
+    const cr = await consumeCode(secKey(req.user.id), 'security_change', d.sec_code); if (cr !== 'ok') return res.status(400).json({ error: CODE_ERRORS[cr], reason: cr });
+    if (idf.type === 'phone' && !phoneEnabled()) return res.status(400).json({ error: 'Adding a phone number is coming soon (SMS isn’t set up yet).' });
     const { rows: n } = await q(`SELECT count(*)::int AS n FROM users WHERE ${identCol(idf)} = $1 AND email_verified_at IS NOT NULL`, [idf.value]);
     if (n[0].n >= 10) return res.status(409).json({ error: 'That address already has the maximum number of accounts' });
     const r = await issueCode({ key: changeKey(req.user.id, idf), email: idf.type === 'email' ? idf.value : null, phone: idf.type === 'phone' ? idf.value : null, userId: req.user.id }, 'change_identifier');
@@ -330,7 +362,11 @@ export function registerSocial(api, { requireAuth, requireVerified, id, pagePost
     const idf = parseIdentifier(d.identifier, d.country);
     const r = await consumeCode(changeKey(req.user.id, idf), 'change_identifier', d.code);
     if (r !== 'ok') return res.status(400).json({ error: CODE_ERRORS[r], reason: r });
+    const { rows: [old] } = await q('SELECT email FROM users WHERE id = $1', [req.user.id]);
     await q(`UPDATE users SET ${idf.type === 'email' ? 'email' : 'phone'} = $1, updated_at = now() WHERE id = $2`, [idf.value, req.user.id]);
+    await q('DELETE FROM sessions WHERE user_id = $1 AND id <> $2', [req.user.id, req.user.session_id]);
+    const what = idf.type === 'email' ? 'email address' : 'phone number';
+    if (old?.email) await sendMail({ to: old.email, subject: `Your Connectly ${what} was changed`, text: `The ${what} on your Connectly account was just changed and other devices were signed out.\n\nIf this wasn't you, secure your account now: ${config.appUrl}/forgot` }).catch(() => {});
     res.json({ ok: true });
   });
   api.get('/me/activity', requireAuth, async (req, res) => {

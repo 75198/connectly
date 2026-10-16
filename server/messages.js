@@ -10,6 +10,7 @@ import sharp from 'sharp';
 import { z } from 'zod';
 import { q } from './db.js';
 import { config } from './config.js';
+import { usableSticker } from './stickerpacks.js';
 import { HttpError } from './uploads.js';
 import { pushTo } from './push.js';
 import { mintToken, liveConfigured } from './live.js';
@@ -202,7 +203,8 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
     try {
       const c = await memberOf(id(req.params.id), req.user.id);
       if (!c.is_group) { const { rows } = await q('SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id <> $2', [c.id, req.user.id]); if (rows.length && await blockedWith(req.user.id, rows.map((r) => r.user_id))) return res.status(403).json({ error: 'You can’t message this person' }); }
-      const d = z.object({ body: z.string().trim().max(5000).default(''), hd: z.enum(['0', '1']).default('0'), voice: z.enum(['0', '1']).default('0'), sticker: z.string().regex(/^[a-z0-9-]{1,40}$/).optional(), duration: z.coerce.number().min(0).max(3600).optional() }).strict().parse({ body: req.body?.body || undefined, hd: req.body?.hd || undefined, voice: req.body?.voice || undefined, sticker: req.body?.sticker || undefined, duration: req.body?.duration || undefined });
+      const d = z.object({ body: z.string().trim().max(5000).default(''), hd: z.enum(['0', '1']).default('0'), voice: z.enum(['0', '1']).default('0'), sticker: z.string().regex(/^[a-z0-9-]{1,40}$/).optional(), sticker_id: z.coerce.number().int().positive().optional(), duration: z.coerce.number().min(0).max(3600).optional() }).strict().parse({ body: req.body?.body || undefined, hd: req.body?.hd || undefined, voice: req.body?.voice || undefined, sticker: req.body?.sticker || undefined, sticker_id: req.body?.sticker_id || undefined, duration: req.body?.duration || undefined });
+      if (d.sticker_id) { if (!config.features.stickerPacks) return res.status(404).json({ error: 'Not found' }); const st = await usableSticker(req.user.id, d.sticker_id); if (!st) return res.status(400).json({ error: 'Sticker not available' }); return res.status(201).json(await postMessage(c, req.user.id, { kind: 'sticker', meta: { sticker_id: st.id, url: st.image_path } })); }
       if (d.sticker) { if (!config.features.stickers) return res.status(404).json({ error: 'Not found' }); return res.status(201).json(await postMessage(c, req.user.id, { kind: 'sticker', meta: { sticker: d.sticker } })); }
       if (!f) { if (!d.body) return res.status(400).json({ error: 'Write a message' }); return res.status(201).json(await postMessage(c, req.user.id, { body: d.body })); }
       const hd = d.hd === '1';

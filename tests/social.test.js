@@ -134,17 +134,26 @@ test('marketplace: create, browse with filters, view, mark sold, delete', async 
 
 test('change password needs current; revokes other sessions', async () => {
   const other = request.agent(app); await post(other, '/api/auth/login').send({ login: 'ben', password: 'Password123!' });
-  let r = await post(B, '/api/me/password').send({ current_password: 'wrong', new_password: 'BenNew12345!' }); assert.equal(r.status, 403);
-  r = await post(B, '/api/me/password').send({ current_password: 'Password123!', new_password: 'BenNew12345!' }); assert.equal(r.status, 200);
+  let r = await post(B, '/api/me/security-code').send({ password: 'wrong', action: 'password' }); assert.equal(r.status, 403);
+  r = await post(B, '/api/me/password').send({ current_password: 'Password123!', new_password: 'BenNew12345!' }); assert.equal(r.status, 400, 'code required');
+  r = await post(B, '/api/me/security-code').send({ password: 'Password123!', action: 'password' }); assert.equal(r.status, 200);
+  const mail = [...testOutbox].reverse().find((m) => m.to === 'ben@s.io' && /security code/.test(m.subject)); assert.match(mail.text, /trying to change your Connectly password from .* at .*UTC/); assert.match(mail.text, /secure your account/);
+  r = await post(B, '/api/me/password').send({ current_password: 'Password123!', new_password: 'BenNew12345!', code: lastCode('ben@s.io') === '000000' ? '111111' : '000000' }); assert.equal(r.status, 400);
+  r = await post(B, '/api/me/password').send({ current_password: 'wrong', new_password: 'BenNew12345!', code: lastCode('ben@s.io') }); assert.equal(r.status, 403);
+  r = await post(B, '/api/me/password').send({ current_password: 'Password123!', new_password: 'BenNew12345!', code: lastCode('ben@s.io') }); assert.equal(r.status, 200);
+  assert.ok(testOutbox.some((m) => m.to === 'ben@s.io' && /password was changed/.test(m.subject)), 'alert email');
   r = await other.get('/api/me'); assert.equal(r.status, 401); r = await B.get('/api/me'); assert.equal(r.status, 200);
 });
 
 test('change email verified with a code sent to the new address', async () => {
-  let r = await post(C, '/api/me/identifier/start').send({ identifier: 'cal.new@s.io', password: 'bad' }); assert.equal(r.status, 403);
-  r = await post(C, '/api/me/identifier/start').send({ identifier: 'cal.new@s.io', password: 'Password123!' }); assert.equal(r.status, 200);
+  let r = await post(C, '/api/me/identifier/start').send({ identifier: 'cal.new@s.io', password: 'bad', sec_code: '123456' }); assert.equal(r.status, 403);
+  r = await post(C, '/api/me/identifier/start').send({ identifier: 'cal.new@s.io', password: 'Password123!' }); assert.equal(r.status, 400, 'security code required');
+  r = await post(C, '/api/me/security-code').send({ password: 'Password123!', action: 'email' }); assert.equal(r.status, 200);
+  r = await post(C, '/api/me/identifier/start').send({ identifier: 'cal.new@s.io', password: 'Password123!', sec_code: lastCode('cal@s.io') }); assert.equal(r.status, 200);
   r = await post(C, '/api/me/identifier/confirm').send({ identifier: 'cal.new@s.io', code: '000000' === lastCode('cal.new@s.io') ? '111111' : '000000' }); assert.equal(r.status, 400);
   r = await post(C, '/api/me/identifier/confirm').send({ identifier: 'cal.new@s.io', code: lastCode('cal.new@s.io') }); assert.equal(r.status, 200);
   r = await C.get('/api/me'); assert.equal(r.body.email, 'cal.new@s.io');
+  assert.ok(testOutbox.some((m) => m.to === 'cal@s.io' && /email address was changed/.test(m.subject)), 'alert to old email');
   r = await post(C, '/api/me/identifier/start').send({ identifier: '08031234567', password: 'Password123!' }); assert.equal(r.status, 400, 'phone needs SMS');
 });
 

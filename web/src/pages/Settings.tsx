@@ -68,19 +68,30 @@ function Account() {
     </div></div>;
 }
 
+// Step 1 for any sensitive change: current password + a code we email to the account's current address.
+function SecurityCode({ action, pw, setPw, code, setCode }: { action: 'password' | 'email' | 'phone'; pw: string; setPw: (v: string) => void; code: string; setCode: (v: string) => void }) {
+  const [sent, setSent] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const send = async () => { setErr(''); if (!pw) { setErr('Enter your current password first'); return; } setBusy(true); try { const r = await api<{ sent_to: string }>('/me/security-code', { json: { password: pw, action } }); setSent(r.sent_to); } catch (x: any) { setErr(x.message); } finally { setBusy(false); } };
+  return <>
+    <label>Current password<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} required autoComplete="current-password" /></label>
+    {!sent ? <button type="button" className="btn" onClick={send} disabled={busy}>{busy ? 'Sending…' : 'Email me a security code'}</button>
+      : <><p className="meta">We sent a 6-digit code to <b>{sent}</b>. <button type="button" className="linkbtn" onClick={send} disabled={busy}>Send again</button></p><CodeInput value={code} onChange={setCode} /></>}
+    {err && <p className="err">{err}</p>}
+  </>;
+}
 function ChangeId({ kind }: { kind: 'email' | 'phone' }) {
   const { me, refresh } = useSession(); const s = useStatus();
-  const [val, setVal] = useState(''); const [country, setCountry] = useState(guessCountry); const [pw, setPw] = useState(''); const [code, setCode] = useState(''); const [sent, setSent] = useState('');
+  const [val, setVal] = useState(''); const [country, setCountry] = useState(guessCountry); const [pw, setPw] = useState(''); const [code, setCode] = useState(''); const [sent, setSent] = useState(''); const [sec, setSec] = useState('');
   if (!me) return null;
-  const start = (e: FormEvent) => { e.preventDefault(); s.run(async () => { const r = await api<{ sent_to: string; type: string }>('/me/identifier/start', { json: { identifier: val, country, password: pw } }); if (r.type !== kind) throw new Error(kind === 'email' ? 'Enter an email address' : 'Enter a phone number'); setSent(r.sent_to); }); };
+  const start = (e: FormEvent) => { e.preventDefault(); s.run(async () => { const r = await api<{ sent_to: string; type: string }>('/me/identifier/start', { json: { identifier: val, country, password: pw, sec_code: sec } }); if (r.type !== kind) throw new Error(kind === 'email' ? 'Enter an email address' : 'Enter a phone number'); setSent(r.sent_to); }); };
   const confirm = (e: FormEvent) => { e.preventDefault(); s.run(async () => { await api('/me/identifier/confirm', { json: { identifier: sent, country, code } }); await refresh(); setSent(''); setVal(''); setPw(''); setCode(''); s.setMsg(kind === 'email' ? 'Email updated' : 'Phone number updated'); }); };
   return <div className="stack"><Back title={kind === 'email' ? 'Change email' : 'Change phone number'} />
     <p className="meta">Current: {(kind === 'email' ? me.email : me.phone) || 'not added'}</p>
     {!sent ? <form className="card stack" onSubmit={start}>
       {kind === 'email' ? <label>New email<input type="email" value={val} onChange={(e) => setVal(e.target.value)} required autoComplete="email" autoCapitalize="none" /></label>
         : <IdentifierInput value={val} onChange={setVal} country={country} onCountry={setCountry} />}
-      <label>Current password<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} required autoComplete="current-password" /></label>
-      {s.view}<button className="btn primary" disabled={s.busy}>Send code</button>
+      <SecurityCode action={kind} pw={pw} setPw={setPw} code={sec} setCode={setSec} />
+      {s.view}<button className="btn primary" disabled={s.busy || sec.length !== 6}>Continue</button>
     </form> : <form className="card stack" onSubmit={confirm}>
       <p>We sent a 6-digit code to <b>{sent}</b>.</p><CodeInput value={code} onChange={setCode} />
       {s.view}<button className="btn primary" disabled={s.busy || code.length !== 6}>Confirm</button>
@@ -89,12 +100,12 @@ function ChangeId({ kind }: { kind: 'email' | 'phone' }) {
 }
 
 function Password() {
-  const s = useStatus(); const [cur, setCur] = useState(''); const [nw, setNw] = useState('');
+  const s = useStatus(); const [cur, setCur] = useState(''); const [nw, setNw] = useState(''); const [code, setCode] = useState('');
   return <div className="stack"><Back title="Change password" />
-    <form className="card stack" onSubmit={(e) => { e.preventDefault(); s.run(async () => { await api('/me/password', { json: { current_password: cur, new_password: nw } }); setCur(''); setNw(''); s.setMsg('Password changed. Other devices were signed out.'); }); }}>
-      <label>Current password<input type="password" value={cur} onChange={(e) => setCur(e.target.value)} required autoComplete="current-password" /></label>
+    <form className="card stack" onSubmit={(e) => { e.preventDefault(); s.run(async () => { await api('/me/password', { json: { current_password: cur, new_password: nw, code } }); setCur(''); setNw(''); setCode(''); s.setMsg('Password changed. Other devices were signed out.'); }); }}>
+      <SecurityCode action="password" pw={cur} setPw={setCur} code={code} setCode={setCode} />
       <label>New password<input type="password" value={nw} onChange={(e) => setNw(e.target.value)} minLength={8} required autoComplete="new-password" /><span className="hint">At least 8 characters</span></label>
-      {s.view}<button className="btn primary" disabled={s.busy}>Change password</button>
+      {s.view}<button className="btn primary" disabled={s.busy || code.length !== 6}>Change password</button>
     </form></div>;
 }
 

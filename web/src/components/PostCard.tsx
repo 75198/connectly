@@ -1,3 +1,4 @@
+import { StickerPicker, type Pick } from './StickerPacks';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, authorHref, Comment, Post, REACTIONS, Reaction, feelingEmoji, haptic, postTime, timeAgo, toast } from '../api';
@@ -167,7 +168,7 @@ export function Comments({ post, onCount }: { post: Post; onCount: (n: number) =
   const one = (c: Comment, isReply = false) => (
     <div key={c.id} className={`comment ${isReply ? 'reply' : ''}`}>
       <Avatar user={c.author} size={30} />
-      <div className="grow"><div className="bubble"><UserLink user={c.author} /> <VerifiedBadge on={c.author.verified} size={13} /><CommentText body={c.body} /></div>
+      <div className="grow"><div className="bubble"><UserLink user={c.author} /> <VerifiedBadge on={c.author.verified} size={13} />{c.body && <CommentText body={c.body} />}{c.sticker_url && <img className="commentsticker" src={c.sticker_url} alt="Sticker" />}</div>
         <div className="meta row small"><time title={new Date(c.created_at).toLocaleString()}>{timeAgo(c.created_at)}</time>
           <button className="linkish" onClick={() => setReplyTo(c)}>Reply</button>
           {(c.is_mine || post.is_mine) && <button className="linkish" onClick={() => remove(c)}>Delete</button>}</div>
@@ -179,14 +180,15 @@ export function Comments({ post, onCount }: { post: Post; onCount: (n: number) =
       {err && <p className="error">{err}</p>}
       {top.map((c) => <div key={c.id}>{one(c)}{items.filter((r) => r.parent_id === c.id).map((r) => one(r, true))}</div>)}
       {replyTo && <div className="meta small">Replying to {replyTo.author.full_name} · <button className="linkish" onClick={() => setReplyTo(null)}>cancel</button></div>}
-      <CommentBox key={replyTo?.id ?? 0} placeholder={replyTo ? 'Write a reply…' : 'Write a comment…'} onSubmit={(b) => add(b, replyTo?.id)} />
+      <CommentBox key={replyTo?.id ?? 0} placeholder={replyTo ? 'Write a reply…' : 'Write a comment…'} onSubmit={(b) => add(b, replyTo?.id)} onSticker={async (s) => { await api(`/posts/${post.id}/comments`, { json: { body: '', parent_id: replyTo?.id, ...(s.id ? { sticker_id: s.id } : { sticker_key: s.key }) } }); setReplyTo(null); await load(); }} />
     </div>
   );
 }
-function CommentBox({ onSubmit, placeholder }: { onSubmit: (b: string) => Promise<void>; placeholder: string }) {
-  const [v, setV] = useState(''); const [err, setErr] = useState('');
+function CommentBox({ onSubmit, onSticker, placeholder }: { onSubmit: (b: string) => Promise<void>; onSticker?: (p: Pick) => Promise<void>; placeholder: string }) {
+  const [v, setV] = useState(''); const [err, setErr] = useState(''); const [stk, setStk] = useState(false); const fx = useFeatures();
   return <form className="row commentbox" onSubmit={async (e) => { e.preventDefault(); if (!v.trim()) return; try { await onSubmit(v); setV(''); } catch (x: any) { setErr(x.message); } }}>
-    <input value={v} onChange={(e) => setV(e.target.value)} placeholder={placeholder} maxLength={2000} autoFocus={placeholder.includes('reply')} /><button className="btn primary" disabled={!v.trim()}>Send</button>{err && <span className="error">{err}</span>}
+    <input value={v} onChange={(e) => setV(e.target.value)} placeholder={placeholder} maxLength={2000} autoFocus={placeholder.includes('reply')} />{onSticker && (fx?.stickers || fx?.sticker_packs) && <button type="button" className="btn icon ghost" aria-label="Stickers" onClick={() => setStk(true)}>😊</button>}
+    {stk && onSticker && <StickerPicker onClose={() => setStk(false)} onPick={async (p) => { setStk(false); try { await onSticker(p); } catch (x: any) { setErr(x.message); } }} />}<button className="btn primary" disabled={!v.trim()}>Send</button>{err && <span className="error">{err}</span>}
   </form>;
 }
 

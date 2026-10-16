@@ -11,7 +11,7 @@ export type Post = { id: number; body: string; image_path: string | null; visibi
   music?: Track | null; remix_of?: { id: number; video_path: string; poster_path: string; username: string; full_name: string } | null;
   poll?: { id: number; question: string; options: string[]; closes_at: string | null; counts: Record<string, number>; my_vote: number | null } | null };
 export type Track = { id: number; title: string; artist: string; url: string; license: string; duration_seconds?: number; source_url?: string; mood?: string; uses?: number };
-export type Comment = { id: number; post_id: number; parent_id: number | null; body: string; created_at: string; author: Author; is_mine?: boolean };
+export type Comment = { sticker_url?: string | null; id: number; post_id: number; parent_id: number | null; body: string; created_at: string; author: Author; is_mine?: boolean };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
 export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
@@ -53,7 +53,7 @@ export function deviceName(ua: string | null) {
 export type Features = { reels: boolean; welcome_hero: boolean; ai_support?: boolean; live?: boolean; subscriptions?: boolean;
   messages?: boolean; calls?: boolean; verified?: boolean; hashtags?: boolean; for_you?: boolean; push?: boolean; i18n?: boolean; translate?: boolean; creator_tools?: boolean; events?: boolean; polls?: boolean; close_friends?: boolean; hide_likes?: boolean; two_step?: boolean;
   music?: boolean; ar_effects?: boolean; remix?: boolean; challenges?: boolean; gifts?: boolean; games?: boolean; watch_together?: boolean; memories?: boolean; stickers?: boolean; streaks?: boolean;
-  news?: boolean; backfill?: boolean; local_currency?: boolean; downloads?: boolean; auto_translate?: boolean; friends_feed?: boolean; ai_creator?: boolean; tips?: boolean; lite_mode?: boolean; safety_center?: boolean; anti_scam?: boolean; msg_controls?: boolean; paid_verification?: boolean; add_yours?: boolean; collections?: boolean; private_accounts?: boolean; who_can?: boolean; hide_presence?: boolean; hide_lists?: boolean; restrict_mute?: boolean; hidden_words?: boolean; disappearing?: boolean; data_export?: boolean; discoverability?: boolean; teen_safety?: boolean };
+  news?: boolean; backfill?: boolean; local_currency?: boolean; downloads?: boolean; auto_translate?: boolean; friends_feed?: boolean; ai_creator?: boolean; tips?: boolean; lite_mode?: boolean; safety_center?: boolean; anti_scam?: boolean; msg_controls?: boolean; paid_verification?: boolean; sticker_packs?: boolean; add_yours?: boolean; collections?: boolean; private_accounts?: boolean; who_can?: boolean; hide_presence?: boolean; hide_lists?: boolean; restrict_mute?: boolean; hidden_words?: boolean; disappearing?: boolean; data_export?: boolean; discoverability?: boolean; teen_safety?: boolean };
 let featuresP: Promise<Features> | null = null;
 export function getFeatures(): Promise<Features> {
   if (!featuresP) featuresP = api<{ features?: Features }>('/auth/capabilities').then((c) => c.features || { reels: false, welcome_hero: false }).catch(() => { featuresP = null; return { reels: false, welcome_hero: false }; });

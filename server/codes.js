@@ -10,19 +10,21 @@ const COPY = {
   verify_email: (c) => ['Your Connectly confirmation code', `Your Connectly confirmation code is ${c}\n\nIt expires in ${TTL_MIN} minutes. If you didn't sign up, ignore this email.`],
   reset_password: (c) => ['Your Connectly password reset code', `Your Connectly password reset code is ${c}\n\nIt expires in ${TTL_MIN} minutes. If you didn't ask for this, ignore this email.`],
   change_identifier: (c) => ['Confirm your new Connectly email', `Your Connectly confirmation code is ${c}\n\nEnter it to confirm this as your new address. It expires in ${TTL_MIN} minutes. If you didn't ask for this, ignore this email.`],
+  security_change: (c, x = {}) => [`Your Connectly security code: ${c}`, `Someone is trying to change your Connectly ${x.what || 'account details'} from ${x.device || 'an unknown device'}${x.place ? ` in ${x.place}` : ''} at ${x.time || 'just now'}.\n\nCode: ${c}\n\nIt expires in ${TTL_MIN} minutes. Never share this code with anyone, including people who say they work for Connectly.\n\nIf this wasn't you, secure your account now: ${x.secureUrl || ''}`],
+  login_code: (c) => ['Your Connectly login code', `Your Connectly login code is ${c}. It expires in ${TTL_MIN} minutes. Never share it with anyone.`],
   find_account: (c) => ['Your Connectly account code', `Use ${c} to see the Connectly accounts linked to this address.\n\nIt expires in ${TTL_MIN} minutes. If you didn't ask for this, ignore this email.`],
 };
 export const keyOf = (id) => `${id.type}:${id.value}`;
 // target: { key, email?, phone?, userId? }. Returns { ok:true } or { ok:false, retryAfter }.
-export async function issueCode(target, purpose) {
+export async function issueCode(target, purpose, ctx) {
   const { rows } = await q(`SELECT EXTRACT(EPOCH FROM (now() - created_at))::int AS age FROM email_codes WHERE identifier=$1 AND purpose=$2 ORDER BY id DESC LIMIT 1`, [target.key, purpose]);
   if (rows[0] && rows[0].age < COOLDOWN_SEC) return { ok: false, retryAfter: COOLDOWN_SEC - rows[0].age };
   const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
   await q(`UPDATE email_codes SET used_at = now() WHERE identifier=$1 AND purpose=$2 AND used_at IS NULL`, [target.key, purpose]);
   await q(`INSERT INTO email_codes (identifier, user_id, purpose, code_hash, expires_at) VALUES ($1,$2,$3,$4, now() + interval '${TTL_MIN} minutes')`, [target.key, target.userId || null, purpose, hash(target.key, purpose, code)]);
-  const [subject, text] = COPY[purpose](code);
+  const [subject, text] = COPY[purpose](code, ctx);
   if (target.email) await sendMail({ to: target.email, subject, text });
-  else await sendSms(target.phone, `Connectly code: ${code} (expires in ${TTL_MIN} min)`);
+  else await sendSms(target.phone, `Connectly code: ${code} (expires in ${TTL_MIN} min). Never share it.`, code);
   return { ok: true };
 }
 // Returns 'ok' | 'invalid' | 'expired' | 'locked'.

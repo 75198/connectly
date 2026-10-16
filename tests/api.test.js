@@ -4,6 +4,7 @@ import request from 'supertest';
 import sharp from 'sharp';
 import { createApp, pool } from '../server/app.js';
 import { migrate } from '../server/migrate.js';
+import { config } from '../server/config.js';
 import { testOutbox } from '../server/mailer.js';
 import { testSmsOutbox } from '../server/sms.js';
 import { powFor } from './pow-helper.js';
@@ -303,7 +304,7 @@ test('search people and posts respects visibility', async () => {
 });
 
 test('phone signup works end-to-end when an SMS provider is configured', async () => {
-  process.env.TEST_SMS = '1';
+  process.env.TEST_SMS = '1'; config.features.phoneAuth = true;
   try {
     const a = agent();
     let r = await signup(a, '', { identifier: '0803 123 4567', country: 'NG', full_name: 'Phone User' });
@@ -311,7 +312,15 @@ test('phone signup works end-to-end when an SMS provider is configured', async (
     const code = testSmsOutbox.at(-1).text.match(/\d{6}/)[0]; assert.equal(testSmsOutbox.at(-1).to, '+2348031234567');
     r = await post(a, '/api/auth/verify').send({ identifier: '+2348031234567', code }); assert.equal(r.status, 200);
     r = await post(agent(), '/api/auth/login').send({ login: '08031234567', password: 'Password123!', country: 'NG' }); assert.equal(r.status, 200, 'login with local phone format');
-  } finally { delete process.env.TEST_SMS; }
+    // SMS code login
+    r = await post(agent(), '/api/auth/otp/start').send({ identifier: '08031234567', country: 'NG' }); assert.equal(r.status, 200);
+    const otp = testSmsOutbox.at(-1).text.match(/\d{6}/)[0]; const b = agent();
+    r = await post(b, '/api/auth/otp/verify').send({ identifier: '08031234567', country: 'NG', code: otp === '000000' ? '111111' : '000000' }); assert.equal(r.status, 400);
+    r = await post(b, '/api/auth/otp/verify').send({ identifier: '08031234567', country: 'NG', code: otp }); assert.equal(r.status, 200);
+    r = await b.get('/api/me'); assert.equal(r.status, 200);
+    config.features.phoneAuth = false; r = await post(agent(), '/api/auth/otp/start').send({ identifier: '08031234567', country: 'NG' }); assert.equal(r.status, 404, 'flag off');
+    r = await signup(agent(), '', { identifier: '0803 123 9999', country: 'NG', full_name: 'Phone Two' }); assert.equal(r.status, 400, 'phone signup off with flag off');
+  } finally { delete process.env.TEST_SMS; config.features.phoneAuth = false; }
 });
 
 test('contacts matching by hash only', async () => {

@@ -299,3 +299,15 @@ html.lite .skel { animation: none; }
 .gv-imgs{gap:8px;flex-wrap:wrap}
 .gv-imgs img{width:140px;max-width:42vw;height:110px;object-fit:cover;border-radius:10px}
 .gv-review{border-top:1px solid var(--line,#eee);padding-top:10px}
+.stk-tabs{gap:6px;overflow-x:auto;padding-bottom:6px}
+.stk-tabs>button{width:40px;height:40px;border-radius:10px;border:0;background:transparent;flex:none}
+.stk-tabs>button.on{background:var(--hover,#eef)}
+.stk-tabs img{width:30px;height:30px;object-fit:contain}
+.stk-item{position:relative}
+.stk-item img{width:100%;aspect-ratio:1;object-fit:contain}
+.stk-x{position:absolute;top:0;right:0;width:24px;height:24px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff}
+.stk-actions{flex-wrap:wrap;gap:8px}
+.stk-canvas{width:100%;max-width:320px;aspect-ratio:1;margin:0 auto;display:block;background:repeating-conic-gradient(#eee 0 25%,#fff 0 50%) 0 0/20px 20px;border-radius:12px}
+.stk-shapes{flex-wrap:wrap;gap:6px}
+.stickergrid.sm img{width:48px;height:48px;object-fit:contain}
+.commentsticker{display:block;width:96px;height:96px;object-fit:contain;margin-top:4px}
