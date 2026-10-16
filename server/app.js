@@ -141,7 +141,7 @@ function liveConnectSrc() {
 }
 export function round78Features() {
   const f = config.features; const out = {};
-  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads', 'autoTranslate', 'friendsFeed', 'aiCreator', 'tips', 'liteMode', 'safetyCenter', 'antiScam', 'msgControls', 'paidVerification', 'stickerPacks'])
+  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads', 'autoTranslate', 'friendsFeed', 'aiCreator', 'tips', 'liteMode', 'safetyCenter', 'antiScam', 'msgControls', 'paidVerification', 'stickerPacks', 'msgEncryption'])
     out[k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] = !!f[k];
   return out;
 }
@@ -197,6 +197,8 @@ export async function purgeScheduledDeletions() {
 export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
+  // HTTPS only (behind the proxy): redirect plain http and send HSTS.
+  if (config.features.httpsOnly) app.use((req, res, next) => { if (req.secure || ['localhost', '127.0.0.1', '::1'].includes(req.hostname)) { res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains'); return next(); } return res.redirect(308, `https://${req.get('host')}${req.originalUrl}`); });
   app.disable('x-powered-by');
   app.use(helmet({
     contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:', ...(config.features.backfill ? ['https://archive.org', 'https://*.archive.org'] : [])], frameSrc: config.features.backfill ? ['https://archive.org'] : ["'none'"], mediaSrc: ["'self'", 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'", ...(config.features.arEffects ? ["'wasm-unsafe-eval'"] : [])], workerSrc: ["'self'", 'blob:'], connectSrc: ["'self'", ...liveConnectSrc()], objectSrc: ["'none'"], frameAncestors: ["'none'"], upgradeInsecureRequests: config.cookieSecure ? [] : null } },
@@ -853,7 +855,8 @@ export function createApp() {
     if (err?.name === 'MulterError') return res.status(400).json({ error: err.message });
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
     if (err?.status && err.status < 500) return res.status(err.status).json({ error: err.message });
-    console.error(err);
+    // Never log message text or user content: database errors can echo row values, so only log the safe parts.
+    console.error('[error]', err?.code || '', String(err?.message || err).slice(0, 200).replace(/\(.*\)/g, '(…)'), err?.stack?.split('\n')[1]?.trim() || '');
     res.status(500).json({ error: 'Something went wrong' });
   });
   return app;

@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { q } from './db.js';
 import { config } from './config.js';
 import { usableSticker } from './stickerpacks.js';
+import { seal, open, openRow, sealFile, readSealed } from './msgcrypt.js';
 import { HttpError } from './uploads.js';
 import { pushTo } from './push.js';
 import { mintToken, liveConfigured } from './live.js';
@@ -84,14 +85,14 @@ export const MSG_SELECT = `SELECT m.id, m.conversation_id, m.sender_id, m.kind, 
 
 export async function postMessage(conv, senderId, { kind = 'text', body = '', media_path = null, poster_path = null, media_hd = false, meta = {} }) {
   const { rows: [m] } = await q(`INSERT INTO messages (conversation_id, sender_id, kind, body, media_path, poster_path, media_hd, meta, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
-    (SELECT CASE WHEN ${config.features.disappearing ? 'true' : 'false'} AND c.disappear_seconds IS NOT NULL AND $3 <> 'notice' THEN now() + c.disappear_seconds * interval '1 second' END FROM conversations c WHERE c.id = $1)) RETURNING id`, [conv.id, senderId, kind, body, media_path, poster_path, media_hd, meta]);
+    (SELECT CASE WHEN ${config.features.disappearing ? 'true' : 'false'} AND c.disappear_seconds IS NOT NULL AND $3 <> 'notice' THEN now() + c.disappear_seconds * interval '1 second' END FROM conversations c WHERE c.id = $1)) RETURNING id`, [conv.id, senderId, kind, seal(body), sealFile(media_path), sealFile(poster_path), media_hd, meta]);
   await q('UPDATE conversations SET last_message_at = now() WHERE id = $1', [conv.id]);
   await q('UPDATE conversation_members SET last_read_id = GREATEST(last_read_id, $2), typing_at = NULL, accepted_at = COALESCE(accepted_at, now()) WHERE conversation_id = $1 AND user_id = $3', [conv.id, m.id, senderId]);
   const { rows: [s] } = await q('SELECT full_name FROM users WHERE id = $1', [senderId]);
   const { rows: others } = await q('SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id <> $2 AND left_at IS NULL', [conv.id, senderId]);
   const preview = { text: body.slice(0, 120), image: 'Sent a photo', video: 'Sent a video', voice: 'Sent a voice note', call: 'Started a call', game: 'Started a game', sticker: 'Sent a sticker' }[kind] || 'New message';
   for (const o of others) pushTo(o.user_id, { title: conv.is_group ? `${s.full_name} in ${conv.title || 'your group'}` : s.full_name, body: preview, url: `/messages/${conv.id}`, tag: `chat-${conv.id}` });
-  return (await q(`${MSG_SELECT} WHERE m.id = $1`, [m.id])).rows[0];
+  return openRow((await q(`${MSG_SELECT} WHERE m.id = $1`, [m.id])).rows[0]);
 }
 
 export function registerMessages(api, { requireAuth, requireVerified, id }) {
@@ -106,11 +107,12 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
 
   api.get('/conversations', requireAuth, on, async (req, res) => {
     const { rows } = await q(`SELECT c.id, c.is_group, c.title, c.last_message_at, ${MEMBERS},
-        (SELECT row_to_json(x) FROM (SELECT lm.id, lm.sender_id, lm.kind, CASE WHEN lm.deleted_at IS NULL THEN left(lm.body, 120) ELSE '' END AS body, lm.created_at FROM messages lm WHERE lm.conversation_id = c.id ORDER BY lm.id DESC LIMIT 1) x) AS last_message,
+        (SELECT row_to_json(x) FROM (SELECT lm.id, lm.sender_id, lm.kind, CASE WHEN lm.deleted_at IS NULL THEN lm.body ELSE '' END AS body, lm.created_at FROM messages lm WHERE lm.conversation_id = c.id ORDER BY lm.id DESC LIMIT 1) x) AS last_message,
         (SELECT count(*)::int FROM messages um WHERE um.conversation_id = c.id AND um.id > me.last_read_id AND um.sender_id <> $1) AS unread, (me.accepted_at IS NULL) AS is_request
       FROM conversations c JOIN conversation_members me ON me.conversation_id = c.id AND me.user_id = $1 AND me.left_at IS NULL
       WHERE EXISTS (SELECT 1 FROM messages mm WHERE mm.conversation_id = c.id) OR c.created_by = $1 ORDER BY c.last_message_at DESC LIMIT 200`, [req.user.id]);
     await maskPresence(req.user.id, rows);
+    for (const r of rows) if (r.last_message?.body) r.last_message.body = String(open(r.last_message.body)).slice(0, 120);
     res.json({ items: rows });
   });
   api.get('/conversations/unread', requireAuth, on, async (req, res) => {
@@ -195,6 +197,7 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
     // Read receipts are reciprocal: turn yours off and you can't see others' either.
     const myRR = st0.find((s) => s.user_id === req.user.id)?.read_receipts !== false;
     const st = config.features.msgControls ? st0.filter((s) => s.user_id === req.user.id || (myRR && s.read_receipts !== false)) : st0;
+    rows.forEach(openRow);
     if (config.features.hiddenWords) await filterHidden(req.user.id, rows);
     res.json({ items: rows, disappear_seconds: c.disappear_seconds ?? null, reads: Object.fromEntries(st.filter((s) => s.accepted || s.user_id === req.user.id).map((s) => [s.user_id, s.last_read_id])), is_request: !st.find((s) => s.user_id === req.user.id)?.accepted, typing: st.filter((s) => s.typing && s.accepted && s.user_id !== req.user.id).map((s) => s.user_id) });
   });
@@ -221,6 +224,21 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
     const { rowCount } = await q('UPDATE messages SET deleted_at = now() WHERE id = $1 AND sender_id = $2 AND deleted_at IS NULL', [id(req.params.id), req.user.id]);
     if (!rowCount) return res.status(404).json({ error: 'Message not found' }); res.json({ ok: true });
   });
+  // Encrypted media: only chat members can fetch it; decrypted on the fly (supports Range for video).
+  const sendSealed = (which) => async (req, res) => {
+    const { rows: [m] } = await q('SELECT conversation_id, media_path, poster_path, kind FROM messages WHERE id = $1 AND deleted_at IS NULL', [id(req.params.id)]);
+    if (!m) return res.status(404).end(); await memberOf(m.conversation_id, req.user.id);
+    const p = which === 'poster' ? m.poster_path : m.media_path; if (!p?.startsWith('enc:')) return res.status(404).end();
+    let buf; try { buf = readSealed(p); } catch { return res.status(404).end(); }
+    const ext = p.split('.').pop(); const type = { webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', mp4: 'video/mp4', m4a: 'audio/mp4', ogg: 'audio/ogg', webm: 'audio/webm' }[ext] || 'application/octet-stream';
+    res.set({ 'Content-Type': type, 'Cache-Control': 'private, max-age=3600', 'Accept-Ranges': 'bytes' });
+    const range = /bytes=(\d*)-(\d*)/.exec(req.get('range') || '');
+    if (range) { const start = range[1] ? +range[1] : 0; const end = range[2] ? Math.min(+range[2], buf.length - 1) : buf.length - 1; if (start > end) return res.status(416).end();
+      res.status(206).set('Content-Range', `bytes ${start}-${end}/${buf.length}`); return res.end(buf.subarray(start, end + 1)); }
+    res.end(buf);
+  };
+  api.get('/messages/:id/media', requireAuth, on, sendSealed('media'));
+  api.get('/messages/:id/poster', requireAuth, on, sendSealed('poster'));
   // Delete for me only (others still see it).
   api.post('/messages/:id/hide', requireAuth, on, async (req, res) => {
     if (!config.features.msgControls) return res.status(404).json({ error: 'Not found' });
@@ -232,7 +250,8 @@ export function registerMessages(api, { requireAuth, requireVerified, id }) {
   api.patch('/messages/:id', requireAuth, on, async (req, res) => {
     if (!config.features.msgControls) return res.status(404).json({ error: 'Not found' });
     const { body } = z.object({ body: z.string().trim().min(1).max(4000) }).strict().parse(req.body);
-    const { rows } = await q(`UPDATE messages SET body = $3, edited_at = now() WHERE id = $1 AND sender_id = $2 AND kind = 'text' AND deleted_at IS NULL AND created_at > now() - interval '15 minutes' RETURNING id, body, edited_at`, [id(req.params.id), req.user.id, body]);
+    const { rows } = await q(`UPDATE messages SET body = $3, edited_at = now() WHERE id = $1 AND sender_id = $2 AND kind = 'text' AND deleted_at IS NULL AND created_at > now() - interval '15 minutes' RETURNING id, edited_at`, [id(req.params.id), req.user.id, seal(body)]);
+    if (rows[0]) rows[0].body = body;
     if (!rows[0]) return res.status(403).json({ error: 'You can only edit your own messages for a short time after sending.' }); res.json(rows[0]);
   });
   api.put('/messages/:id/reaction', requireAuth, on, async (req, res) => {

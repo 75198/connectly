@@ -238,3 +238,18 @@ createdb connectly_restore && pg_restore --no-owner -d connectly_restore db.dump
 - Requirements: photo + bio, account ≥ 30 days, two-step login on, no suspension or upheld reports in 90 days, ID + selfie upload. Images are stored in `verify-private/` (outside public uploads, never backed up to git) and deleted after review.
 - Admin › Paid verification queue approves/rejects (sets `paid_approved_at`). The badge turns on only while `paid_verified_until > now()`; `syncPaidBadges()` (every 10 min) adds it and removes it when the subscription lapses. Payment is "Coming soon": Apple/Google require in-app purchase for paid verification in mobile apps.
 - Benefits: badge (reuses `verified_at`, so impersonation protection applies), paid-verified users rank higher in people search, their reports are sorted first for admins. Notable (admin-granted) verification is separate (`verified_kind = 'notable'`) and never lapses.
+
+### 26.s Security changes need a code
+- `POST /api/me/security-code {password, action}` emails a 6-digit code to the account's current email (device, country, UTC time, "secure my account" link). `/me/password` needs `code`; `/me/identifier/start` needs `sec_code`. Wrong-password lockout per user, max 5 codes/hour, 5 attempts per code. After a change: other sessions are signed out and an alert email goes out (to the old address for email changes).
+
+### 26.p Phone sign-up / login (FEATURE_PHONE_AUTH, off)
+- Works only with the flag AND a delivery channel. `server/sms.js` tries WhatsApp Cloud API auth template → Telegram Gateway → SMS (Termii / Africa's Talking / Twilio). `/auth/otp/start` + `/auth/otp/verify` (account picker when a number has several accounts; two-step accounts must use password login). Linking a phone uses Settings › Phone (security code + code to the phone).
+
+### 26.k Sticker packs (FEATURE_STICKER_PACKS)
+- `server/stickerpacks.js`, migration 024, `components/StickerPacks.tsx`. Personal packs, maker (crop/shape/border/text on canvas; no automatic background removal), PNG/WebP import, share link `/stickers/add/<token>`, saving packs, stickers in DMs (`sticker_id`) and comments (`sticker_id` / `sticker_key`). Reports: 3 open reports auto-hide a pack; Admin › Reported sticker packs.
+
+### 26.e Message encryption at rest (FEATURE_MSG_ENCRYPTION + MESSAGE_KEY)
+- `server/msgcrypt.js`: AES-256-GCM, text stored as `v1:<base64>`; new media is moved to `msg-private/` encrypted and served via `/api/messages/:id/media|poster` to members only (Range supported). `encryptBacklog()` runs every minute and converts old rows one by one, verifying decryption first. Legacy plaintext stays readable.
+- MESSAGE_KEY must be stored safely outside the codespace: without it, encrypted messages in backups can't be read.
+- 500 errors are logged without row values; HTTPS_ONLY=1 redirects http and sends HSTS.
+- Planned (not built): opt-in end-to-end encrypted chats (see the round 10 report).

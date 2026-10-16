@@ -7,6 +7,7 @@ import { q } from './db.js';
 import { config } from './config.js';
 import { memberOf, postMessage, hiddenWordsOf, matchesHidden } from './messages.js';
 import { notify } from './social.js';
+import { open, readSealed } from './msgcrypt.js';
 
 const F = config.features;
 const flag = (k) => (_req, res, next) => (F[k] ? next() : res.status(404).json({ error: 'Not found' }));
@@ -160,6 +161,7 @@ export function registerRound9(api, { requireAuth, requireVerified, id, pagePost
     const one = async (sql) => (await q(sql, [uid])).rows;
     const [profile] = await one(`SELECT id, username, full_name, email, phone, bio, location, birth_date, created_at, avatar_path, cover_path, locale, is_private, dm_privacy, who_can_comment, who_can_tag, who_can_mention, hide_presence, hide_follow_lists, hidden_words, discover_by_email, discover_by_phone FROM users WHERE id = $1`);
     const posts = await one('SELECT id, body, image_path, video_path, visibility, close_friends_only, created_at, updated_at, deleted_at FROM posts WHERE author_id = $1 ORDER BY id');
+    const files0 = [];
     const data = {
       'profile.json': profile, 'posts.json': posts,
       'comments.json': await one('SELECT id, post_id, body, created_at FROM comments WHERE author_id = $1 ORDER BY id'),
@@ -173,8 +175,10 @@ export function registerRound9(api, { requireAuth, requireVerified, id, pagePost
       'saved_collections.json': await one('SELECT c.name, i.post_id, i.created_at FROM collections c JOIN collection_items i ON i.collection_id = c.id WHERE c.user_id = $1'),
       'login_devices.json': await one('SELECT created_at, last_seen_at, user_agent FROM sessions WHERE user_id = $1 ORDER BY created_at DESC').catch(() => []),
     };
+    for (const m of data['messages.json']) { m.body = open(m.body); if (String(m.media_path || '').startsWith('enc:')) { try { files0.push({ name: 'media/' + path.basename(m.media_path.slice(4)), data: readSealed(m.media_path) }); } catch { /* missing */ } m.media_path = 'media/' + path.basename(String(m.media_path).slice(4)); } }
     const files = [{ name: 'README.txt', data: `Your Connectly data for @${profile.username}, exported ${new Date().toISOString()}.\nJSON files hold your account, posts, comments, messages you sent, and more. The media folder has your photos and videos.\n` }];
     for (const [n, v] of Object.entries(data)) files.push({ name: n, data: JSON.stringify(v, null, 2) });
+    files.push(...files0);
     const media = new Set(); for (const p of [...posts, ...data['stories.json'], ...data['messages.json'], profile]) for (const k of ['image_path', 'video_path', 'media_path', 'avatar_path', 'cover_path']) if (p[k]) media.add(p[k]);
     let total = 0;
     for (const m of media) {

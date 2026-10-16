@@ -311,3 +311,4 @@ html.lite .skel { animation: none; }
 .stk-shapes{flex-wrap:wrap;gap:6px}
 .stickergrid.sm img{width:48px;height:48px;object-fit:contain}
 .commentsticker{display:block;width:96px;height:96px;object-fit:contain;margin-top:4px}
+.encnote{text-align:center;font-size:12px;opacity:.7;margin:8px auto;max-width:320px}

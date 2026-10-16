@@ -75,6 +75,8 @@ export const config = {
     paidVerification: (env.FEATURE_PAID_VERIFICATION ?? '0') === '1',
     stickerPacks: (env.FEATURE_STICKER_PACKS ?? '0') === '1',
     phoneAuth: (env.FEATURE_PHONE_AUTH ?? '0') === '1', // phone signup/login by SMS code; also needs an SMS provider in .env
+    msgEncryption: (env.FEATURE_MSG_ENCRYPTION ?? '0') === '1', // needs MESSAGE_KEY (32 bytes, base64)
+    httpsOnly: (env.HTTPS_ONLY ?? '0') === '1',
     msgControls: (env.FEATURE_MSG_CONTROLS ?? '0') === '1',
     discoverability: (env.FEATURE_DISCOVERABILITY ?? '0') === '1',
     teenSafety: (env.FEATURE_TEEN_SAFETY ?? '0') === '1',

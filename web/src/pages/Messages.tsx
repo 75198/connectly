@@ -125,6 +125,7 @@ export function Chat() {
       {f?.calls && <><button className="btn icon ghost" aria-label="Voice call" onClick={() => call(false)}>📞</button><button className="btn icon ghost" aria-label="Video call" onClick={() => call(true)}>🎥</button></>}
       <button className="btn icon ghost" aria-label="Chat theme" onClick={() => setSheet('theme')}>🎨</button></header>
     <div className="chatscroll">
+      {ffs?.msg_encryption && <p className="encnote">🔒 Messages and media in this chat are encrypted when stored on our servers.</p>}
       {ffs?.anti_scam && others.some((o) => o.new_account && !o.verified) && msgs.some((m) => m.sender_id !== me.id && m.body && scamAsk(m.body)) && <div className="scambanner" role="alert"><b>⚠️ Possible scam</b><span>This is a new account asking about money, codes, passwords, crypto or investments. Never send money or share codes or bank details with people you haven’t met. Connectly will never ask for your login code.</span></div>}
       {!msgs.length && <p className="meta center chatempty">{t('noMessages')}</p>}
       {msgs.filter((m) => !m.expires_at || new Date(m.expires_at).getTime() > Date.now()).map((m, i) => { const mine = m.sender_id === me.id; const sender = conv.members.find((x: Member) => x.id === m.sender_id); const prev = msgs[i - 1]; const gap = !prev || new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() > 15 * 60e3;

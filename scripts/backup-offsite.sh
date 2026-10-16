@@ -6,7 +6,7 @@
 set -euo pipefail
 C="${CODESPACE:?set CODESPACE}"; PASSFILE="${PASSFILE:?set PASSFILE}"
 D="${1:-$HOME/connectly-backups}/$(date +%Y%m%d-%H%M)"; umask 077; mkdir -p "$D"; cd "$D"
-gh codespace ssh -c "$C" -- 'cd /workspaces/connectly && DBURL=$(grep ^DATABASE_URL= .env | cut -d= -f2-) && rm -rf ~/bk && mkdir -m 700 ~/bk && pg_dump "$DBURL" -Fc --no-owner --no-privileges -f ~/bk/connectly-db.dump && tar czf ~/bk/connectly-uploads.tgz uploads && cd ~/bk && sha256sum connectly-* > SHA256SUMS'
+gh codespace ssh -c "$C" -- 'cd /workspaces/connectly && DBURL=$(grep ^DATABASE_URL= .env | cut -d= -f2-) && rm -rf ~/bk && mkdir -m 700 ~/bk && pg_dump "$DBURL" -Fc --no-owner --no-privileges -f ~/bk/connectly-db.dump && tar czf ~/bk/connectly-uploads.tgz uploads $(ls -d msg-private 2>/dev/null) && cd ~/bk && sha256sum connectly-* > SHA256SUMS'
 gh codespace cp -e -c "$C" 'remote:~/bk/connectly-db.dump' 'remote:~/bk/connectly-uploads.tgz' 'remote:~/bk/SHA256SUMS' .
 gh codespace ssh -c "$C" -- 'rm -rf ~/bk'
 sha256sum -c SHA256SUMS
