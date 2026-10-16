@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, authorHref, credit, Page, Post, Track, useFeatures } from '../api';
 import { RichText } from '../components/Extras';
 import { markSeen, unseenFirst } from '../components/Backfill';
+import { canOfferSave, saveToGallery } from '../lib/save';
 import { MusicPicker } from '../components/MusicPicker';
 import { askPermission } from '../lib/permission';
 import { Avatar, Icon, Sheet, Spinner, VIS_LABEL } from '../components/ui';
@@ -102,6 +103,7 @@ function ReelItem({ i, post, active, near, muted, onMute, onChange, onComments }
       <button onClick={onComments} aria-label="Comments"><Icon name="chat" /></button><small className="countbtn" role="button" aria-label="See who commented" onClick={() => setEng('comments')}>{fmt(post.comment_count)}</small>
       <button onClick={share} aria-label="Share"><Icon name="share" /></button><small className="countbtn" role="button" aria-label="See who shared" onClick={() => setEng('shares')}>{post.share_count ? fmt(post.share_count) : 'Share'}</small>
       {ff?.remix && <button onClick={() => nav(`/reels/new?remix=${post.id}`)} aria-label="Duet"><span className="railemoji">🎭</span><small>Duet</small></button>}
+      {ff?.downloads && canOfferSave(post) && <button onClick={() => saveToGallery(post.id)} aria-label="Save to gallery"><span className="railemoji">⬇️</span><small>Save</small></button>}
       {!post.is_mine && <button onClick={report} aria-label="Report"><Icon name="flag" /><small>Report</small></button>}
       <span className="reelviews" aria-label={`${post.view_count || 0} views`}><Icon name="eye" /><small>{fmt(post.view_count)}</small></span>
     </div>

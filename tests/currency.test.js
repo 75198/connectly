@@ -58,3 +58,25 @@ test('admin: USD base + per-country override; coin packs priced locally', async 
   assert.ok((await A.get('/api/admin/prices')).body.overrides.length === 1);
   assert.equal((await A.delete('/api/admin/prices/plan:pro/KE').set(H)).status, 200);
 });
+
+test('save to gallery: watermarked public photo; blocked for friends-only, opted-out, private and licensed music', async () => {
+  const fs = await import('node:fs'); const path = await import('node:path'); const sharp = (await import('sharp')).default;
+  config.features.downloads = true;
+  fs.mkdirSync(config.uploadDir, { recursive: true }); await sharp({ create: { width: 800, height: 600, channels: 3, background: '#3a7' } }).jpeg().toFile(path.join(config.uploadDir, 'dl-test.jpg'));
+  const mk = async (vis) => (await pool.query("INSERT INTO posts (author_id, body, image_path, visibility) VALUES ($1, 'hi', '/uploads/dl-test.jpg', $2) RETURNING id", [A.id, vis])).rows[0].id;
+  const pub = await mk('public'), fr = await mk('friends');
+  const B = await reg('bea');
+  let r = await B.get(`/api/posts/${pub}/download`).buffer(true); assert.equal(r.status, 200); assert.equal(r.headers['content-type'], 'image/jpeg');
+  const m = await sharp(r.body).metadata(); assert.equal(m.width, 800); // original size kept
+  assert.equal((await B.get(`/api/posts/${fr}/download`)).status, 403);
+  assert.equal((await A.patch(`/api/posts/${pub}/downloads`).set(H).send({ allow: false })).status, 200);
+  assert.match((await B.get(`/api/posts/${pub}/download`)).body.error, /turned off/);
+  await A.patch(`/api/posts/${pub}/downloads`).set(H).send({ allow: null });
+  await A.patch('/api/me/privacy').set(H).send({ allow_downloads: false }); assert.equal((await B.get(`/api/posts/${pub}/download`)).status, 403);
+  await A.patch('/api/me/privacy').set(H).send({ allow_downloads: true }); assert.equal((await B.get(`/api/posts/${pub}/download-check`)).body.ok, true);
+  const { rows: [t] } = await pool.query("INSERT INTO music_tracks (external_id, title, artist, duration_seconds, url, license, source_url) VALUES ('t-hit', 'Hit', 'Label', 30, '/x.mp3', 'All rights reserved', 'https://x') RETURNING id");
+  await pool.query('UPDATE posts SET music_track_id = $1 WHERE id = $2', [t.id, pub]);
+  assert.match((await B.get(`/api/posts/${pub}/download`)).body.error, /licensed music/);
+  await pool.query('UPDATE users SET is_private = true WHERE id = $1', [A.id]); await pool.query('UPDATE posts SET music_track_id = NULL WHERE id = $1', [pub]);
+  assert.equal((await B.get(`/api/posts/${pub}/download`)).status, 403);
+});

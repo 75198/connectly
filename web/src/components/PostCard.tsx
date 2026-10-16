@@ -7,6 +7,7 @@ import { EngagementSheet, trackShare, type EngTab } from './Engagement';
 import { DuetView, InsightsSheet, MusicChip, PollView, RichText, TranslateButton, VerifiedBadge, useImpression } from './Extras';
 import { useFeatures } from '../api';
 import { sfx } from '../lib/sounds';
+import { canOfferSave, saveToGallery } from '../lib/save';
 
 type Mode = 'feed' | 'draft' | 'deleted';
 export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Post; onChange: (p: Post) => void; onDelete: (id: number) => void; mode?: Mode }) {
@@ -14,7 +15,7 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
   const mine = post.is_mine;
   const ffx = useFeatures();
   const [colls, setColls] = useState(false);
-  const [menu, setMenu] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const [share, setShare] = useState(false); const [eng, setEng] = useState<EngTab | null>(null);
+  const [viewer, setViewer] = useState(false); const [menu, setMenu] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const [share, setShare] = useState(false); const [eng, setEng] = useState<EngTab | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.body); const [dvis, setDvis] = useState(post.visibility);
   const [showComments, setShowComments] = useState(false);
@@ -25,6 +26,7 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
   const f = useFeatures(); const ref = useRef<HTMLElement>(null); useImpression(ref, post.id, post.is_mine); const [tr, setTr] = useState<string | null>(null); const [ins, setIns] = useState(false);
   const hideCount = (post.like_count === null || (post.hide_like_count && !mine) || (!!me?.hide_like_counts && !mine && !!f?.hide_likes));
   const pin = async () => { setMenu(false); try { await api(`/posts/${post.id}/pin`, { method: post.pinned_at ? 'DELETE' : 'PUT' }); onChange({ ...post, pinned_at: post.pinned_at ? null : new Date().toISOString() }); toast(post.pinned_at ? 'Unpinned' : 'Pinned to your profile'); } catch (e: any) { setErr(e.message); } };
+  const toggleDl = async () => { setMenu(false); const allow = post.allow_downloads === false; try { await api(`/posts/${post.id}/downloads`, { method: 'PATCH', json: { allow } }); onChange({ ...post, allow_downloads: allow }); toast(allow ? 'Downloads allowed' : 'Downloads turned off for this post'); } catch (e: any) { setErr(e.message); } };
   const toggleHide = async () => { setMenu(false); try { await api(`/posts/${post.id}/hide-likes`, { method: 'PUT', json: { hidden: !post.hide_like_count } }); onChange({ ...post, hide_like_count: !post.hide_like_count }); toast(post.hide_like_count ? 'Like count visible' : 'Like count hidden from others'); } catch (e: any) { setErr(e.message); } };
 
   async function react(r: Reaction | null) {
@@ -72,6 +74,8 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
             {mine && f?.creator_tools && <button role="menuitem" onClick={() => { setMenu(false); setIns(true); }}>📊 View insights</button>}
             {mine && f?.hide_likes && <button role="menuitem" onClick={toggleHide}>🙈 {post.hide_like_count ? 'Show like count' : 'Hide like count'}</button>}
             {mine && post.kind !== 'reel' && <button role="menuitem" onClick={toDraft}><Icon name="image" /> Save as draft</button>}
+            {ffx?.downloads && canOfferSave(post) && <button role="menuitem" onClick={() => { setMenu(false); saveToGallery(post.id); }}>⬇️ Save to gallery</button>}
+            {mine && ffx?.downloads && post.visibility === 'public' && <button role="menuitem" onClick={toggleDl}>{post.allow_downloads === false ? '✅ Allow downloads' : '🚫 Turn off downloads'}</button>}
             <button role="menuitem" onClick={toggleSave}><Icon name="bookmark" /> {post.saved_by_me ? 'Unsave post' : 'Save post'}</button>
             {ffx?.collections && <button role="menuitem" onClick={() => { setMenu(false); setColls(true); }}>📁 Save to collection</button>}
             {!mine && me && !post.author.space && <button role="menuitem" onClick={() => { setMenu(false); report(); }}><Icon name="flag" /> Report post</button>}
@@ -87,7 +91,10 @@ export function PostCard({ post, onChange, onDelete, mode = 'feed' }: { post: Po
       ) : post.body && <><p className="body"><RichText text={tr ?? post.body} /></p>{!mine && <TranslateButton text={post.body} onText={setTr} />}</>}
       {post.poll && <PollView post={post} onChange={onChange} />}
       {post.music && <MusicChip track={post.music} start={post.music_start} />}
-      {post.image_path && post.kind !== 'reel' && <img className="postimg" src={post.image_path} alt="" loading="lazy" decoding="async" />}
+      {post.image_path && post.kind !== 'reel' && <img className="postimg" src={post.image_path} alt="" loading="lazy" decoding="async" onClick={() => setViewer(true)} />}
+      {viewer && post.image_path && <div className="mediaviewer" role="dialog" aria-label="Photo" onClick={() => setViewer(false)}><img src={post.image_path} alt="" />
+        <div className="mvbar" onClick={(e) => e.stopPropagation()}><button className="btn icon reelbtn" aria-label="Close" onClick={() => setViewer(false)}><Icon name="x" /></button>
+          {ffx?.downloads && canOfferSave(post) && <button className="btn reelbtn" onClick={() => saveToGallery(post.id)}>⬇️ Save</button>}</div></div>}
       {post.kind === 'reel' && post.remix_of && post.remix_layout === 'duet' ? <DuetView post={post} /> : post.kind === 'reel' && post.poster_path && <Link to={`/reels/${post.id}`} className="reelthumb" aria-label="Watch reel"><img src={post.poster_path} alt="" loading="lazy" /><span><Icon name="play" /> Reel{post.view_count ? ` · ${post.view_count} views` : ''}</span></Link>}
       {err && <p className="error">{err}</p>}
       {mode === 'draft' && <div className="row"><button className="btn primary grow" onClick={() => act(() => api(`/posts/${post.id}/publish`, { method: 'POST' }), 'Published')}>Publish</button>

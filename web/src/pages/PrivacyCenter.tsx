@@ -6,7 +6,7 @@ import { api, toast, useFeatures } from '../api';
 import { Avatar, Icon, Spinner } from '../components/ui';
 import { Toggle } from './SettingsExtra';
 
-type Priv = { is_private: boolean; dm_privacy: string; who_can_comment: string; who_can_tag: string; who_can_mention: string; hide_presence: boolean; hide_follow_lists: boolean; hidden_words: string[]; hidden_words_on: boolean; discover_by_email: boolean; discover_by_phone: boolean; is_teen: boolean; pending_requests?: number };
+type Priv = { is_private: boolean; dm_privacy: string; who_can_comment: string; who_can_tag: string; who_can_mention: string; hide_presence: boolean; hide_follow_lists: boolean; hidden_words: string[]; hidden_words_on: boolean; discover_by_email: boolean; discover_by_phone: boolean; allow_downloads?: boolean; is_teen: boolean; pending_requests?: number };
 type U = { id: number; username: string; full_name: string; avatar_path: string | null };
 const Back = ({ title, to = '/settings' }: { title: string; to?: string }) => <div className="row"><Link to={to} className="btn icon ghost" aria-label="Back"><Icon name="back" /></Link><h1 className="pagetitle">{title}</h1></div>;
 const WHO: [string, string][] = [['everyone', 'Everyone'], ['following', 'People you follow'], ['none', 'No one']];
@@ -16,7 +16,7 @@ export function PrivacyCenter() {
   useEffect(() => { api<Priv>('/me/privacy').then(setP).catch(() => {}); }, []);
   if (!p || !f) return <Spinner />;
   const save = async (patch: Partial<Priv>) => { setP({ ...p, ...patch }); try { setP(await api<Priv>('/me/privacy', { method: 'PATCH', json: patch })); toast('Saved'); } catch (e: any) { toast(e.message, 'err'); } };
-  const Row = ({ title, hint, on, k }: { title: string; hint: string; on: boolean; k: keyof Priv }) => <div className="row between privrow"><span className="grow"><b>{title}</b><small className="meta block">{hint}</small></span><Toggle label={title} on={on} onChange={(v) => save({ [k]: v } as any)} /></div>;
+  const Row = ({ title, hint, on, k, invert }: { title: string; hint: string; on: boolean; k: keyof Priv; invert?: boolean }) => <div className="row between privrow"><span className="grow"><b>{title}</b><small className="meta block">{hint}</small></span><Toggle label={title} on={on} onChange={(v) => save({ [k]: invert ? !v : v } as any)} /></div>;
   const Who = ({ title, k, opts = WHO }: { title: string; k: keyof Priv; opts?: [string, string][] }) => <div className="stack whoblock"><b>{title}</b><div className="segmented">{opts.map(([v, l]) => <button key={v} type="button" className={p[k] === v ? 'on' : ''} onClick={() => save({ [k]: v } as any)}>{l}</button>)}</div></div>;
   return <div className="stack"><Back title="Privacy" />
     {f.private_accounts && <section className="card stack"><Row title="Private account" k="is_private" on={p.is_private} hint={p.is_private ? 'Only followers you approve can see your posts, followers and following.' : 'Anyone can see your posts. Turn on to approve each new follower.'} />
@@ -27,8 +27,9 @@ export function PrivacyCenter() {
       <Who title="Who can comment on your posts" k="who_can_comment" />
       <Who title="Who can tag you in posts" k="who_can_tag" />
       <Who title="Who can @mention you" k="who_can_mention" /></section>}
+    {f.downloads && <section className="card stack"><h3>Downloads</h3><Row title="Allow downloads" k="allow_downloads" on={p.allow_downloads !== false} hint="People can save your public photos and reels with a Connectly watermark and your name. Never for private, friends-only or close-friends posts, or posts with licensed music. You can change this on each post from its ⋯ menu." /></section>}
     {(f.hide_presence || f.hide_lists) && <section className="card stack"><h3>Visibility</h3>
-      {f.hide_presence && <Row title="Show activity status" k="hide_presence" on={!p.hide_presence} hint="When off, people can’t see when you’re online or last active, and you can’t see theirs." />}
+      {f.hide_presence && <Row title="Show activity status" k="hide_presence" invert on={!p.hide_presence} hint="When off, people can’t see when you’re online or last active, and you can’t see theirs." />}
       {f.hide_lists && <Row title="Hide followers and following" k="hide_follow_lists" on={p.hide_follow_lists} hint="Only you will see who follows you and who you follow." />}</section>}
     {f.hidden_words && <HiddenWords p={p} save={save} />}
     {f.discoverability && <section className="card stack"><h3>Find me by contact info</h3>

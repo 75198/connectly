@@ -29,6 +29,7 @@ import { registerRound7, saveTags, twoStepMethods, startTwoStep, loginAlert } fr
 import { registerRound8, recordActivity } from './round8.js';
 import { registerNews, recordSearch } from './news.js';
 import { registerPricing } from './pricing.js';
+import { registerDownloads } from './download.js';
 import { registerBackfill } from './backfill.js';
 import { registerRound9, notifyMentions, allowedBy, isRestricted } from './round9.js';
 import { hiddenWordsOf, matchesHidden } from './messages.js';
@@ -84,7 +85,7 @@ const VISIBLE = `(p.author_id = $1 OR p.visibility = 'public' OR (p.visibility =
 // author of a post/comment: the page when posted "as a page", otherwise the user
 const authorJson = (alias, userAlias) => `CASE WHEN ${alias}.as_space_id IS NOT NULL THEN (SELECT json_build_object('id', s.id, 'username', s.slug, 'full_name', s.name, 'avatar_path', s.photo_path, 'space', true, 'kind', s.kind) FROM spaces s WHERE s.id = ${alias}.as_space_id)
   ELSE json_build_object('id', ${userAlias}.id, 'username', ${userAlias}.username, 'full_name', ${userAlias}.full_name, 'avatar_path', ${userAlias}.avatar_path, 'verified', ${userAlias}.verified_at IS NOT NULL) END`;
-const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at, p.kind, p.video_path, p.video_low_path, p.poster_path, p.video_seconds, p.feeling, p.location_tag, p.is_draft, p.deleted_at, p.pinned_at, p.scheduled_for, p.hide_like_count, p.effect, p.remix_layout, p.music_start,
+const POST_SELECT = `SELECT p.id, p.body, p.image_path, p.visibility, p.created_at, p.updated_at, p.kind, p.video_path, p.video_low_path, p.poster_path, p.video_seconds, p.feeling, p.location_tag, p.is_draft, p.deleted_at, p.pinned_at, p.scheduled_for, p.hide_like_count, p.allow_downloads, p.effect, p.remix_layout, p.music_start,
   (SELECT row_to_json(mt) FROM (SELECT t.id, t.title, t.artist, t.url, t.license FROM music_tracks t WHERE t.id = p.music_track_id) mt) AS music,
   (SELECT row_to_json(rx) FROM (SELECT o.id, o.video_path, o.poster_path, ou.username, ou.full_name FROM posts o JOIN users ou ON ou.id = o.author_id WHERE o.id = p.remix_of_id AND o.deleted_at IS NULL AND o.hidden_at IS NULL) rx) AS remix_of,
   (SELECT json_build_object('id', pl.id, 'question', pl.question, 'options', pl.options, 'closes_at', pl.closes_at, 'counts', (SELECT COALESCE(json_object_agg(v.option_idx, v.n), '{}') FROM (SELECT option_idx, count(*)::int n FROM poll_votes WHERE poll_id = pl.id GROUP BY option_idx) v), 'my_vote', (SELECT option_idx FROM poll_votes WHERE poll_id = pl.id AND user_id = $1)) FROM polls pl WHERE pl.post_id = p.id) AS poll,
@@ -132,7 +133,7 @@ function liveConnectSrc() {
 }
 export function round78Features() {
   const f = config.features; const out = {};
-  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency'])
+  for (const k of ['messages', 'calls', 'verified', 'hashtags', 'forYou', 'push', 'i18n', 'translate', 'creatorTools', 'events', 'polls', 'closeFriends', 'hideLikes', 'twoStep', 'music', 'arEffects', 'remix', 'challenges', 'gifts', 'games', 'watchTogether', 'memories', 'stickers', 'streaks', 'aiVision', 'news', 'backfill', 'aiVoice', 'addYours', 'collections', 'privateAccounts', 'whoCan', 'hidePresence', 'hideLists', 'restrictMute', 'hiddenWords', 'disappearing', 'dataExport', 'discoverability', 'teenSafety', 'localCurrency', 'downloads'])
     out[k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] = !!f[k];
   return out;
 }
@@ -644,6 +645,7 @@ export function createApp() {
   registerRound9(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost });
   registerNews(api, { requireAuth });
   registerPricing(api, { requireAuth, requireAdmin });
+  registerDownloads(api, { requireAuth, id });
   registerBackfill(api, { requireAuth });
   registerPostExtras(api, { requireAuth, requireVerified, id, pagePosts, getVisiblePost, getOwnPost, POST_SELECT, notify });
 
